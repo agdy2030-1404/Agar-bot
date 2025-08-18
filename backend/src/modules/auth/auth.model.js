@@ -20,8 +20,23 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "/default-avatar.png", // مسار افتراضي
     },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
-    accounts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Account" }],
+    notifications: [
+      {
+        title: String,
+        message: String,
+        type: {
+          type: String,
+          enum: ["info", "success", "error"],
+          default: "info",
+        },
+        read: { type: Boolean, default: false },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    isAdmin: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

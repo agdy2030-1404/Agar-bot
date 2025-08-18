@@ -3,15 +3,19 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { startSchedulers } from "./modules/scheduler/adScheduler.js";
-import MessageScheduler from "./modules/scheduler/messageScheduler.js"; 
-import { errorHandler } from "./utils/error.js";
+import authRoutes from "./modules/auth/auth.route.js";
+import messageTemplateRoutes from "./modules/messageTemplate/messageTemplate.route.js";
+import botRoutes from "./modules/bot/bot.route.js";
+import adRoutes from "./modules/ad/ads.route.js";
+import activityRoutes from "./modules/activity/activity.route.js";
+import statsRoutes from "./modules/stats/stats.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.route.js";
 
 const app = express();
 dotenv.config();
 
 // بعد الاتصال بقاعدة البيانات
-connectDb()
+connectDb();
 
 app.use(express.json());
 app.use(cookieParser());
@@ -28,16 +32,18 @@ app.use(
     ],
   })
 );
+app.use("/api/auth", authRoutes);
+app.use("/api/message-templates", messageTemplateRoutes);
+app.use("/api/bot", botRoutes);
+app.use("/api/ads", adRoutes);
+app.use("/api/activities", activityRoutes);
+app.use("/api/stats", statsRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 const port = process.env.PORT || 3005;
 app.listen(port, () => {
   console.log(`Server is running on port ${port}!`);
 });
-
-startSchedulers();
-MessageScheduler.start(); 
-
-app.use(errorHandler);
 
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || 500;

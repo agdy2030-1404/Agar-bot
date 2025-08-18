@@ -15,9 +15,10 @@ export const verifyToken = (req, res, next) => {
 
     req.user = {
       id: decoded.id,
+      name: decoded.name, // الآن الاسم موجود
       isAdmin: decoded.isAdmin,
       isHR: decoded.isHR,
-      employeeId: decoded.employeeId, // إضافة معرّف الموظف
+      employeeId: decoded.employeeId,
     };
 
     next();

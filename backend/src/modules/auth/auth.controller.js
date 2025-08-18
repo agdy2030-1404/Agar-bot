@@ -1,7 +1,7 @@
 // auth.controller.js
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
-import User from "./auth.models.js";
+import User from "./auth.model.js";
 import { errorHandler } from "../../utils/error.js";
 
 export const register = async (req, res, next) => {
@@ -35,7 +35,7 @@ export const register = async (req, res, next) => {
       .status(201)
       .cookie("access_token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: true,
         sameSite: "None", // حتى يُسمح له بالعمل بين دومينات مختلفة
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 أيام
       })
@@ -60,7 +60,7 @@ export const login = async (req, res, next) => {
     }
 
     const token = jwt.sign(
-      { id: validUser._id, isAdmin: validUser.isAdmin },
+      { id: validUser._id, isAdmin: validUser.isAdmin, name: validUser.name },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -71,7 +71,7 @@ export const login = async (req, res, next) => {
       .status(200)
       .cookie("access_token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: true,
         sameSite: "None",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       })
@@ -83,4 +83,42 @@ export const login = async (req, res, next) => {
 
 export const logout = (req, res) => {
   res.clearCookie("access_token").status(200).json("تم تسجيل الخروج بنجاح");
+};
+export const getUnreadNotifications = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
+
+    const unreadCount = user.notifications.filter((n) => !n.read).length;
+
+    res
+      .status(200)
+      .json({ success: true, unreadCount, notifications: user.notifications });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// وضع إشعار كمقروء
+export const markNotificationRead = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { notificationId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
+
+    const notification = user.notifications.id(notificationId);
+    if (!notification)
+      return res.status(404).json({ message: "الإشعار غير موجود" });
+
+    notification.read = true;
+    await user.save();
+
+    res.status(200).json({ success: true, message: "تم وضع الإشعار كمقروء" });
+  } catch (error) {
+    next(error);
+  }
 };

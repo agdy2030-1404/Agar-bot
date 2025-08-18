@@ -1,10 +1,17 @@
+// routes/activity.routes.js
 import express from "express";
-import { getActivities } from "./activity.controller.js";
-import protect from "../../middlewares/auth.js";
+import {
+  getUserActivities,
+  getRecentActivities
+} from "./activity.controller.js";
+import { verifyToken } from "../../utils/verifyUser.js";
 
 const router = express.Router();
 
-router.use(protect);
-router.get("/", getActivities);
+// Get user activities with pagination
+router.get("/", verifyToken, getUserActivities);
+
+// Get recent activities for dashboard
+router.get("/recent", verifyToken, getRecentActivities);
 
 export default router;
