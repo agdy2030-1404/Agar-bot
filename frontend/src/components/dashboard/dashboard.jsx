@@ -1,22 +1,59 @@
-// app/dashboard/page.jsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSelector } from "react-redux";
 import Header from "./Header";
 import StatCard from "./StatCard";
 import BotStatus from "./BotStatus";
 import AdsTable from "./AdsTable";
 import ActivityLog from "./ActivityLog";
 import MessageTemplates from "./MessageTemplates";
+import { getDashboardData } from "../../services/dashboard.service";
 
 const Dashboard = () => {
-  const [isBotRunning, setIsBotRunning] = useState(true);
+  const currentUser = useSelector((state) => state.user.currentUser);
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isBotRunning, setIsBotRunning] = useState(false);
   const [updateInterval, setUpdateInterval] = useState(24);
-  
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (currentUser) {
+        try {
+          setLoading(true);
+          const data = await getDashboardData();
+          setDashboardData(data?.data || {}); // استخدم data?.data
+          setIsBotRunning(data?.data?.botStatus?.isRunning || false);
+          setUpdateInterval(data?.data?.botStatus?.updateInterval || 24);
+        } catch (error) {
+          console.error("Failed to fetch dashboard data:", error);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchData();
+  }, [currentUser]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+        <Header />
+        <div className="p-4 md:p-6 max-w-7xl mx-auto">
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Header />
-      
+
       <main className="p-4 md:p-6 max-w-7xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800">
@@ -29,41 +66,45 @@ const Dashboard = () => {
 
         {/* بطاقات الإحصائيات */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <StatCard 
-            title="عدد الإعلانات" 
-            value="12" 
-            icon="📋" 
-            color="primary" 
-            trend="+2 منذ أمس" 
+          <StatCard
+            title="عدد الإعلانات"
+            icon="📋"
+            color="primary"
+            value={dashboardData?.stats?.totalAds || 0}
+            trend={`${dashboardData?.stats?.adViewsTrend >= 0 ? "+" : ""}${
+              dashboardData?.stats?.adViewsTrend || 0
+            }% عن الأسبوع الماضي`}
           />
-          <StatCard 
-            title="الإعلانات المحدثة" 
-            value="8" 
-            icon="🔄" 
-            color="secondary" 
-            trend="مخطط للتحديث" 
+          <StatCard
+            title="الإعلانات المحدثة"
+            value={dashboardData?.stats.activeAds || "0"}
+            icon="🔄"
+            color="secondary"
+            trend={`من ${dashboardData?.stats.totalAds || 0} إعلان`}
           />
-          <StatCard 
-            title="الرسائل المجابة" 
-            value="24" 
-            icon="💬" 
-            color="green" 
-            trend="+5 منذ ساعة" 
+          <StatCard
+            title="الرسائل المجابة"
+            value={dashboardData?.stats.repliedMessages || "0"}
+            icon="💬"
+            color="green"
+            trend={`${dashboardData?.stats.messageTrend >= 0 ? "+" : ""}${
+              dashboardData?.stats.messageTrend || 0
+            }% عن الأسبوع الماضي`}
           />
-          <StatCard 
-            title="الأخطاء" 
-            value="3" 
-            icon="⚠️" 
-            color="amber" 
-            trend="-1 منذ أمس" 
+          <StatCard
+            title="الأخطاء"
+            value={dashboardData?.stats.errors || "0"}
+            icon="⚠️"
+            color="amber"
+            trend="آخر 24 ساعة"
           />
         </div>
 
         {/* حالة الروبوت وجدول الإعلانات */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-1">
-            <BotStatus 
-              isRunning={isBotRunning} 
+            <BotStatus
+              isRunning={isBotRunning}
               setIsRunning={setIsBotRunning}
               updateInterval={updateInterval}
               setUpdateInterval={setUpdateInterval}
@@ -86,7 +127,9 @@ const Dashboard = () => {
       </main>
 
       <footer className="mt-8 py-4 px-6 border-t border-gray-200 text-center text-gray-500 bg-white">
-        <p>© {new Date().getFullYear()} روبوت حراج وعقار. جميع الحقوق محفوظة.</p>
+        <p>
+          © {new Date().getFullYear()} روبوت حراج وعقار. جميع الحقوق محفوظة.
+        </p>
       </footer>
     </div>
   );

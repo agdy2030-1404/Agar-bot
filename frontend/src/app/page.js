@@ -1,10 +1,10 @@
+import ProtectedRoute from "@/components/ProtectedRoute";
 import Dashboard from "@/components/dashboard/dashboard";
-import React from "react";
 
-export default function page() {
+export default function DashboardPage() {
   return (
-    <div>
+    <ProtectedRoute>
       <Dashboard />
-    </div>
+    </ProtectedRoute>
   );
 }

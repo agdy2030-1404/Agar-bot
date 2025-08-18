@@ -1,76 +1,152 @@
 // app/dashboard/MessageTemplates.jsx
-import React, { useState } from "react";
-import { FaPlus, FaEdit, FaTrash, FaCopy, FaSearch } from "react-icons/fa";
+"use client";
+import React, { useState, useEffect } from "react";
+import {
+  FaPlus,
+  FaEdit,
+  FaTrash,
+  FaCopy,
+  FaSearch,
+  FaEye,
+} from "react-icons/fa";
+import {
+  getTemplates,
+  createTemplate,
+  updateTemplate,
+  deleteTemplateApi,
+  searchTemplates,
+} from "../../services/messageTemplate.service";
+import { toast } from "react-toastify";
 
 const MessageTemplates = () => {
-  const [templates, setTemplates] = useState([
-    {
-      id: 1,
-      title: "الرد الأساسي",
-      content: "مرحباً، شكراً لاهتمامك بالإعلان. هل لديك أي استفسار محدد؟",
-    },
-    {
-      id: 2,
-      title: "طلب معلومات",
-      content: "أهلاً بك، يمكنني إرسال المزيد من الصور والمعلومات إذا كنت مهتماً.",
-    },
-    {
-      id: 3,
-      title: "التواصل عبر الهاتف",
-      content: "شكراً لاهتمامك. يمكنك التواصل معي عبر الهاتف على الرقم 0555555555",
-    },
-    {
-      id: 4,
-      title: "الرد على استفسار السعر",
-      content: "شكراً لسؤالك عن السعر. السعر المذكور في الإعلان نهائي، ولكني مستعد للنقاش عند المعاينة.",
-    },
-  ]);
-
+  const [templates, setTemplates] = useState([]);
   const [newTemplate, setNewTemplate] = useState({ title: "", content: "" });
   const [isAdding, setIsAdding] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingId, setEditingId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [previewContent, setPreviewContent] = useState(null);
+  const [validationErrors, setValidationErrors] = useState({
+    title: "",
+    content: "",
+  });
 
-  const handleAddTemplate = () => {
-    if (newTemplate.title && newTemplate.content) {
+  const validateInputs = () => {
+    const errors = {};
+    if (!newTemplate.title.trim()) {
+      errors.title = "العنوان مطلوب";
+    } else if (newTemplate.title.length > 100) {
+      errors.title = "العنوان يجب أن يكون أقل من 100 حرف";
+    }
+
+    if (!newTemplate.content.trim()) {
+      errors.content = "المحتوى مطلوب";
+    } else if (newTemplate.content.length > 1000) {
+      errors.content = "المحتوى يجب أن يكون أقل من 1000 حرف";
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        setIsLoading(true);
+        const { templates } = await getTemplates();
+        setTemplates(templates);
+      } catch (error) {
+        console.error("Failed to fetch templates:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTemplates();
+  }, []);
+
+  const handleAddTemplate = async () => {
+    if (!validateInputs()) return;
+
+    if (!newTemplate.title.trim() || !newTemplate.content.trim()) {
+      toast.error("الرجاء إدخال عنوان ومحتوى للقالب");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
       if (editingId) {
-        setTemplates(templates.map(t => 
-          t.id === editingId ? {...newTemplate, id: editingId} : t
-        ));
+        const { template } = await updateTemplate(editingId, newTemplate);
+        setTemplates((prev) => [
+          template,
+          ...prev.filter((t) => t._id !== editingId),
+        ]);
         setEditingId(null);
+        toast.success("تم تحديث القالب بنجاح ✅");
       } else {
-        setTemplates([...templates, { ...newTemplate, id: Date.now() }]);
+        const { template } = await createTemplate(newTemplate);
+        setTemplates((prev) => [template, ...prev]);
+        toast.success("تم إضافة القالب بنجاح ✅");
       }
       setNewTemplate({ title: "", content: "" });
       setIsAdding(false);
+    } catch (error) {
+      console.error("Failed to save template:", error);
+      toast.error(error.response?.data?.message || "فشل في حفظ القالب ❌");
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  const deleteTemplate = (id) => {
-    setTemplates(templates.filter((t) => t.id !== id));
+  const deleteTemplate = async (id) => {
+    try {
+      await deleteTemplateApi(id);
+      setTemplates((prev) => prev.filter((t) => t._id !== id));
+      toast.success("تم حذف القالب بنجاح 🗑️");
+    } catch (error) {
+      console.error("Failed to delete template:", error);
+      toast.error("فشل في حذف القالب ❌");
+    }
   };
 
   const editTemplate = (template) => {
     setNewTemplate({ title: template.title, content: template.content });
-    setEditingId(template.id);
+    setEditingId(template._id);
     setIsAdding(true);
   };
 
   const copyTemplate = (content) => {
     navigator.clipboard.writeText(content);
-    alert("تم نسخ القالب!");
+    toast.info("تم نسخ القالب 📋");
   };
 
-  const filteredTemplates = templates.filter(template => 
-    template.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    template.content.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSearch = async (e) => {
+    const query = e.target.value;
+    setSearchTerm(query);
+
+    if (query.trim() === "") {
+      const { templates } = await getTemplates();
+      setTemplates(templates);
+    } else {
+      try {
+        const { templates } = await searchTemplates(query);
+        setTemplates(templates);
+      } catch (error) {
+        console.error("Search failed:", error);
+      }
+    }
+  };
+
+  if (isLoading) {
+    return <div>Loading templates...</div>;
+  }
 
   return (
     <div className="card bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 p-4 border-b border-gray-100">
-        <h2 className="text-lg font-bold text-gray-800 mb-3 md:mb-0">قوالب الردود التلقائية</h2>
-        
+        <h2 className="text-lg font-bold text-gray-800 mb-3 md:mb-0">
+          قوالب الردود التلقائية
+        </h2>
+
         <div className="flex space-x-2 w-full md:w-auto">
           <div className="relative flex-1 md:flex-none">
             <input
@@ -78,11 +154,11 @@ const MessageTemplates = () => {
               placeholder="ابحث في القوالب..."
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={handleSearch}
             />
             <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
           </div>
-          
+
           <button
             onClick={() => {
               setIsAdding(!isAdding);
@@ -91,7 +167,8 @@ const MessageTemplates = () => {
             }}
             className="btn-primary flex items-center whitespace-nowrap"
           >
-            <FaPlus className="ml-2" /> {editingId ? "تعديل قالب" : "إضافة قالب"}
+            <FaPlus className="ml-2" />{" "}
+            {editingId ? "تعديل قالب" : "إضافة قالب"}
           </button>
         </div>
       </div>
@@ -127,17 +204,14 @@ const MessageTemplates = () => {
             ></textarea>
           </div>
           <div className="flex space-x-2">
-            <button 
-              onClick={handleAddTemplate} 
-              className="btn-primary flex-1"
-            >
+            <button onClick={handleAddTemplate} className="btn-primary flex-1">
               {editingId ? "تحديث القالب" : "حفظ القالب"}
             </button>
-            <button 
+            <button
               onClick={() => {
                 setIsAdding(false);
                 setEditingId(null);
-              }} 
+              }}
               className="btn-outline flex-1"
             >
               إلغاء
@@ -146,52 +220,90 @@ const MessageTemplates = () => {
         </div>
       )}
 
-      {filteredTemplates.length === 0 ? (
+      {templates.length === 0 ? (
         <div className="p-8 text-center">
           <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
             <FaSearch className="text-2xl text-gray-400" />
           </div>
-          <h3 className="font-medium text-gray-700">لا توجد قوالب مطابقة للبحث</h3>
-          <p className="text-gray-500 mt-1">جرب كلمات بحث مختلفة أو أضف قالباً جديداً</p>
+          <h3 className="font-medium text-gray-700">
+            لا توجد قوالب مطابقة للبحث
+          </h3>
+          <p className="text-gray-500 mt-1">
+            جرب كلمات بحث مختلفة أو أضف قالباً جديداً
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-          {filteredTemplates.map((template) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+          {templates.map((template) => (
             <div
-              key={template.id}
-              className="border border-gray-200 rounded-xl p-4 bg-white hover:shadow-md transition-all duration-200 relative group"
+              key={template._id}
+              className="border border-gray-200 rounded-xl p-4 bg-white hover:shadow-md transition-all duration-200 relative group min-h-[150px] flex flex-col"
             >
               <div className="flex justify-between items-start mb-2">
-                <h3 className="font-medium text-gray-800">{template.title}</h3>
+                <h3 className="font-medium text-gray-800 line-clamp-1 flex-1">
+                  {template.title}
+                </h3>
                 <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button 
+                  <button
+                    onClick={() => setPreviewContent(template.content)}
+                    className="text-blue-500 hover:text-blue-700 p-1 rounded-full hover:bg-blue-100"
+                    title="معاينة القالب"
+                  >
+                    <FaEye size={14} />
+                  </button>
+                  <button
                     onClick={() => copyTemplate(template.content)}
                     className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100"
                     title="نسخ القالب"
                   >
-                    <FaCopy />
+                    <FaCopy size={14} />
                   </button>
-                  <button 
+                  <button
                     onClick={() => editTemplate(template)}
                     className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100"
                     title="تعديل القالب"
                   >
-                    <FaEdit />
+                    <FaEdit size={14} />
                   </button>
                   <button
-                    onClick={() => deleteTemplate(template.id)}
+                    onClick={() => {
+                      if (window.confirm("هل أنت متأكد من حذف هذا القالب؟")) {
+                        deleteTemplate(template._id);
+                      }
+                    }}
                     className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"
                     title="حذف القالب"
                   >
-                    <FaTrash />
+                    <FaTrash size={14} />
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg mt-2">
+              <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg mt-2 line-clamp-3 flex-1">
                 {template.content}
               </p>
+              <div className="text-xs text-gray-400 mt-2">
+                {new Date(template.createdAt).toLocaleDateString()}
+              </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* معاينة القالب */}
+      {previewContent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl max-w-lg w-full">
+            <h3 className="text-lg font-bold mb-4">معاينة القالب</h3>
+            <p className="text-gray-700 whitespace-pre-line">
+              {previewContent}
+            </p>
+            <button
+              onClick={() => setPreviewContent(null)}
+              className="btn-primary mt-4 w-full"
+            >
+              إغلاق
+            </button>
+          </div>
         </div>
       )}
     </div>
