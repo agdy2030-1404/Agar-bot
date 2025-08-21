@@ -33,7 +33,7 @@ app.use(
   })
 );
 app.use("/api/auth", authRoutes);
-app.use("/api/message-templates", messageTemplateRoutes);
+app.use("/api/templates", messageTemplateRoutes);
 app.use("/api/bot", botRoutes);
 app.use("/api/ads", adRoutes);
 app.use("/api/activities", activityRoutes);
