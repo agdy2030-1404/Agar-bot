@@ -1,57 +1,32 @@
-// services/bot.service.js
+import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
-export const initializeBot = async () => {
-  const response = await fetch(`${API_URL}/api/bot/init`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+const api = axios.create({
+  baseURL: API_URL,
+  withCredentials: true,
+});
 
-  if (!response.ok) throw new Error("Failed to initialize bot");
-  return response.json();
+// معالجة الأخطاء
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // يمكنك إضافة redirect إلى login هنا إذا لزم الأمر
+      console.error('غير مصرح به - يرجى تسجيل الدخول مرة أخرى');
+    }
+    return Promise.reject(error);
+  }
+);
+
+export const botService = {
+  getStatus: () => api.get('/api/bot/status'),
+  start: () => api.post('/api/bot/start'),
+  stop: () => api.post('/api/bot/stop'),
+  fetchAds: () => api.get('/api/ads/fetch'),
+  getAds: (params) => api.get('/api/ads', { params }),
+  updateAd: (adId) => api.post(`/api/ads/${adId}/update`),
+  scheduleUpdates: (data) => api.post('/api/ads/schedule-updates', data),
 };
 
-export const updateBotSettings = async (settings) => {
-  const response = await fetch(`${API_URL}/api/bot/settings`, {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(settings),
-  });
-
-  if (!response.ok) throw new Error("Failed to update bot settings");
-  return response.json();
-};
-
-export const addReplyTemplate = async (template) => {
-  const response = await fetch(`${API_URL}/api/bot/templates`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(template),
-  });
-
-  if (!response.ok) throw new Error("Failed to add reply template");
-  return response.json();
-};
-
-export const getBotStatus = async () => {
-  const response = await fetch(`${API_URL}/api/bot/status`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!response.ok) throw new Error("Failed to fetch bot status");
-  return response.json();
-};
+export default botService;
