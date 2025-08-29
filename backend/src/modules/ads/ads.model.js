@@ -1,4 +1,3 @@
-// modules/ads/ads.model.js
 import mongoose from "mongoose";
 
 const adSchema = new mongoose.Schema(
@@ -34,57 +33,37 @@ const adSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "draft", "expired", "pending"],
+      enum: ["active", "inactive", "pending", "expired"],
       default: "active",
     },
     views: {
       type: Number,
       default: 0,
     },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
     lastUpdated: {
       type: Date,
       default: Date.now,
     },
-    details: {
-      type: Map,
-      of: String,
-      default: {},
+    nextUpdate: {
+      type: Date,
+      default: () => new Date(Date.now() + 20 * 60 * 60 * 1000), // 20 ساعة افتراضياً
     },
-    features: [
-      {
-        type: String,
-      },
-    ],
     updateCount: {
       type: Number,
       default: 0,
     },
-    lastUpdateAttempt: {
-      type: Date,
-      default: null,
+    canUpdate: {
+      type: Boolean,
+      default: true,
     },
-    updateHistory: [
-      {
-        timestamp: {
-          type: Date,
-          default: Date.now,
-        },
-        success: {
-          type: Boolean,
-          default: false,
-        },
-        message: String,
-        method: String,
-      },
-    ],
-    nextScheduledUpdate: {
-      type: Date,
-      default: null,
+    updateError: {
+      type: String,
+      default: "",
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
   },
   {
@@ -94,8 +73,7 @@ const adSchema = new mongoose.Schema(
 
 // فهرس للبحث السريع
 adSchema.index({ adId: 1, userId: 1 });
-adSchema.index({ userId: 1, status: 1 });
+adSchema.index({ status: 1, nextUpdate: 1 });
+adSchema.index({ nextUpdate: 1 });
 
-const Ad = mongoose.model("Ad", adSchema);
-
-export default Ad;
+export default mongoose.model("Ad", adSchema);

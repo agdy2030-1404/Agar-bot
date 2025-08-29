@@ -1,132 +1,109 @@
-// utils/scheduler.js
 import cron from 'node-cron';
 import Ad from '../modules/ads/ads.model.js';
 import botService from '../modules/bot/bot.service.js';
 
-class SchedulerService {
-    constructor() {
-        this.scheduledJobs = new Map();
-    }
+class Scheduler {
+  constructor() {
+    this.scheduledJobs = new Map();
+  }
 
-    // جدولة تحديث إعلان معين
-    scheduleAdUpdate(adId, updateTime) {
-        const jobId = `ad-update-${adId}`;
+  async scheduleAdUpdates() {
+    try {
+      // إيقاف جميع المهام القديمة
+      this.stopAllJobs();
+
+      // جلب الإعلانات التي تحتاج للتحديث
+      const adsToUpdate = await Ad.find({
+        status: 'active',
+        canUpdate: true,
+        nextUpdate: { $lte: new Date() }
+      });
+
+      console.log(`Scheduling updates for ${adsToUpdate.length} ads`);
+
+      for (const ad of adsToUpdate) {
+        this.scheduleSingleAd(ad);
+      }
+    } catch (error) {
+      console.error('Error scheduling ad updates:', error);
+    }
+  }
+
+  scheduleSingleAd(ad) {
+    // إنشاء وقت عشوائي بين 20-48 ساعة
+    const randomHours = Math.floor(Math.random() * 29) + 20; // 20-48 ساعة
+    const updateTime = new Date(Date.now() + randomHours * 60 * 60 * 1000);
+
+    // جدولة المهمة
+    const job = cron.schedule(updateTime, async () => {
+      try {
+        console.log(`Running scheduled update for ad: ${ad.adId}`);
         
-        // إلغاء الجدولة السابقة إذا كانت موجودة
-        this.cancelScheduledUpdate(adId);
-
-        const now = new Date();
-        const delay = updateTime.getTime() - now.getTime();
-
-        if (delay <= 0) {
-            console.log(`الوقت المحدد لتحديث الإعلان ${adId} قد مضى بالفعل`);
-            return null;
+        // التحقق من أن الروبوت يعمل
+        if (!botService.browser || !botService.isLoggedIn) {
+          console.log('Bot not running, skipping update');
+          return;
         }
 
-        const timeoutId = setTimeout(async () => {
-            try {
-                console.log(`تشغيل التحديث المجدول للإعلان: ${adId}`);
-                await this.executeScheduledUpdate(adId);
-            } catch (error) {
-                console.error(`خطأ في التحديث المجدول للإعلان ${adId}:`, error);
-            }
-        }, delay);
+        // تنفيذ التحديث
+        const result = await botService.updateAd(ad.adId);
 
-        this.scheduledJobs.set(jobId, timeoutId);
-        console.log(`تم جدولة تحديث الإعلان ${adId} في ${updateTime}`);
+        if (result.success) {
+          // تحديث وقت التحديث التالي
+          const nextRandomHours = Math.floor(Math.random() * 29) + 20;
+          const nextUpdate = new Date(Date.now() + nextRandomHours * 60 * 60 * 1000);
 
-        return jobId;
-    }
+          await Ad.findByIdAndUpdate(ad._id, {
+            lastUpdated: new Date(),
+            nextUpdate: nextUpdate,
+            updateCount: ad.updateCount + 1,
+            updateError: ''
+          });
 
-    // تنفيذ التحديث المجدول
-    async executeScheduledUpdate(adId) {
-        try {
-            // البحث عن الإعلان في قاعدة البيانات
-            const ad = await Ad.findOne({ adId });
-            if (!ad) {
-                throw new Error(`الإعلان ${adId} غير موجود`);
-            }
-
-            // تشغيل الروبوت إذا لم يكن نشطاً
-            if (!botService.browser) {
-                await botService.initBrowser();
-            }
-
-            // التحقق من تسجيل الدخول
-            const isLoggedIn = await botService.checkLoginStatus();
-            if (!isLoggedIn) {
-                await botService.loginToAqar();
-            }
-
-            // تحديث الإعلان
-            const result = await botService.updateAd(adId);
-
-            // تحديث سجل التحديثات
-            await Ad.findByIdAndUpdate(ad._id, {
-                $push: {
-                    updateHistory: {
-                        timestamp: new Date(),
-                        success: result.success,
-                        message: result.message,
-                        method: 'scheduled'
-                    }
-                },
-                lastUpdateAttempt: new Date(),
-                $inc: { updateCount: result.success ? 1 : 0 }
-            });
-
-            if (result.success) {
-                console.log(`تم التحديث المجدول بنجاح للإعلان: ${adId}`);
-                
-                // جدولة التحديث التالي (20-48 ساعة)
-                const nextUpdateHours = Math.floor(Math.random() * 29) + 20;
-                const nextUpdateTime = new Date(Date.now() + nextUpdateHours * 60 * 60 * 1000);
-                
-                this.scheduleAdUpdate(adId, nextUpdateTime);
-                
-                await Ad.findByIdAndUpdate(ad._id, {
-                    nextScheduledUpdate: nextUpdateTime
-                });
-            }
-
-        } catch (error) {
-            console.error(`فشل في التحديث المجدول للإعلان ${adId}:`, error);
-            
-            // إعادة الجدولة بعد ساعة في حالة الفشل
-            const retryTime = new Date(Date.now() + 60 * 60 * 1000);
-            this.scheduleAdUpdate(adId, retryTime);
+          console.log(`Scheduled update completed for ad: ${ad.adId}`);
         }
-    }
-
-    // إلغاء الجدولة
-    cancelScheduledUpdate(adId) {
-        const jobId = `ad-update-${adId}`;
-        const timeoutId = this.scheduledJobs.get(jobId);
+      } catch (error) {
+        console.error(`Scheduled update failed for ad ${ad.adId}:`, error);
         
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            this.scheduledJobs.delete(jobId);
-            console.log(`تم إلغاء الجدولة للإعلان: ${adId}`);
-        }
-    }
+        // تحديث سجل الخطأ
+        await Ad.findByIdAndUpdate(ad._id, {
+          updateError: error.message,
+          canUpdate: false // تعطيل التحديث التلقائي حتى يتم التصحيح
+        });
+      }
+    });
 
-    // بدء جدولة جميع الإعلانات النشطة
-    async scheduleAllActiveAds() {
-        try {
-            const activeAds = await Ad.find({ status: 'active' });
-            
-            for (const ad of activeAds) {
-                const nextUpdateTime = ad.nextScheduledUpdate || 
-                    new Date(Date.now() + Math.floor(Math.random() * 29 + 20) * 60 * 60 * 1000);
-                
-                this.scheduleAdUpdate(ad.adId, nextUpdateTime);
-            }
-            
-            console.log(`تم جدولة ${activeAds.length} إعلان نشط`);
-        } catch (error) {
-            console.error('خطأ في جدولة الإعلانات النشطة:', error);
-        }
+    this.scheduledJobs.set(ad.adId, job);
+    console.log(`Scheduled update for ad ${ad.adId} at ${updateTime}`);
+  }
+
+  stopAllJobs() {
+    for (const [adId, job] of this.scheduledJobs) {
+      job.stop();
+      console.log(`Stopped job for ad: ${adId}`);
     }
+    this.scheduledJobs.clear();
+  }
+
+  stopJob(adId) {
+    const job = this.scheduledJobs.get(adId);
+    if (job) {
+      job.stop();
+      this.scheduledJobs.delete(adId);
+      console.log(`Stopped job for ad: ${adId}`);
+    }
+  }
+
+  // تشغيل المجدول عند بدء التشغيل
+  async start() {
+    console.log('Starting scheduler...');
+    await this.scheduleAdUpdates();
+    
+    // تحديث الجدول كل ساعة
+    setInterval(() => {
+      this.scheduleAdUpdates();
+    }, 60 * 60 * 1000);
+  }
 }
 
-export default new SchedulerService();
+export default new Scheduler();

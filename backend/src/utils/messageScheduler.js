@@ -1,45 +1,50 @@
-// utils/messageScheduler.js
-import cron from 'node-cron';
-import botService from '../modules/bot/bot.service.js';
+import cron from "node-cron";
+import botService from "../modules/bot/bot.service.js";
 
 class MessageScheduler {
-    constructor() {
-        this.scheduledJob = null;
+  constructor() {
+    this.isProcessing = false;
+  }
+
+  async processMessagesAutomatically() {
+    if (this.isProcessing) {
+      console.log("Message processing is already in progress");
+      return;
     }
 
-    // بدء الجدولة التلقائية للرسائل
-    startAutoMessageProcessing() {
-        // تشغكل كل 30 دقيقة
-        this.scheduledJob = cron.schedule('*/30 * * * *', async () => {
-            try {
-                console.log('بدء المعالجة التلقائية للرسائل...');
-                
-                if (!botService.browser) {
-                    await botService.initBrowser();
-                }
+    this.isProcessing = true;
 
-                const isLoggedIn = await botService.checkLoginStatus();
-                if (!isLoggedIn) {
-                    await botService.loginToAqar();
-                }
+    try {
+      console.log("Starting automatic message processing...");
 
-                await botService.processNewMessages();
-                
-            } catch (error) {
-                console.error('خطأ في المعالجة التلقائية للرسائل:', error);
-            }
-        });
+      // التحقق من أن الروبوت يعمل ومسجل الدخول
+      if (!botService.browser || !botService.isLoggedIn) {
+        console.log("Bot is not ready for message processing");
+        return;
+      }
 
-        console.log('تم بدء الجدولة التلقائية للرسائل (كل 30 دقيقة)');
+      const result = await botService.processNewMessages();
+      console.log(
+        `Automatic message processing completed: ${result.success} successful, ${result.failed} failed`
+      );
+    } catch (error) {
+      console.error("Error in automatic message processing:", error);
+    } finally {
+      this.isProcessing = false;
     }
+  }
 
-    // إيقاف الجدولة
-    stopAutoMessageProcessing() {
-        if (this.scheduledJob) {
-            this.scheduledJob.stop();
-            console.log('تم إيقاف الجدولة التلقائية للرسائل');
-        }
-    }
+  start() {
+    console.log("Starting message scheduler...");
+
+    // تشغيل كل 5 دقائق
+    cron.schedule("*/5 * * * *", () => {
+      this.processMessagesAutomatically();
+    });
+
+    // أيضًا التشغيل فورًا عند البدء
+    this.processMessagesAutomatically();
+  }
 }
 
 export default new MessageScheduler();

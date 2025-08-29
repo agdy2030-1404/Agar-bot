@@ -1,31 +1,71 @@
-import axios from 'axios';
+import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-const api = axios.create({
-  baseURL: API_URL,
-  withCredentials: true,
-});
+// جلب الرسائل
+const getMessages = async (status = "", page = 1, limit = 20) => {
+  const params = new URLSearchParams();
 
-// معالجة الأخطاء
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      console.error('غير مصرح به - يرجى تسجيل الدخول مرة أخرى');
-    }
-    return Promise.reject(error);
-  }
-);
+  if (status) params.append("status", status);
+  params.append("page", page);
+  params.append("limit", limit);
 
-export const messageService = {
-  getMessages: (params) => api.get('/api/messages', { params }),
-  fetchMessages: () => api.get('/api/messages/fetch'),
-  createTemplate: (data) => api.post('/api/messages/templates', data),
-  getTemplates: () => api.get('/api/messages/templates'),
-  updateAutoReply: (data) => api.post('/api/messages/settings', data),
-  updateTemplate: (id, data) => api.put(`/api/messages/templates/${id}`, data),
-  deleteTemplate: (id) => api.delete(`/api/messages/templates/${id}`),
+  const res = await axios.get(`${API_URL}/api/messages?${params.toString()}`, {
+    withCredentials: true,
+  });
+
+  return res.data;
 };
 
-export default messageService;
+// تشغيل المعالجة التلقائية
+const processMessages = async (adId = null) => {
+  let url = `${API_URL}/api/messages/process`;
+  
+  if (adId) {
+    url = `${API_URL}/api/messages/process/${adId}`;
+  }
+
+  const res = await axios.post(url, {}, { withCredentials: true });
+  return res.data;
+};
+
+// معالجة جميع الإعلانات
+const processAllMessages = async () => {
+  const res = await axios.post(`${API_URL}/api/messages/process-all`, {}, {
+    withCredentials: true,
+  });
+  return res.data;
+};
+
+// جلب القوالب
+const getTemplates = async () => {
+  const res = await axios.get(`${API_URL}/api/messages/templates`, {
+    withCredentials: true,
+  });
+  return res.data;
+};
+
+// إنشاء قالب جديد
+const createTemplate = async (template) => {
+  const res = await axios.post(`${API_URL}/api/messages/templates`, template, {
+    withCredentials: true,
+  });
+  return res.data;
+};
+
+// جلب إعلانات المستخدم
+const getUserAds = async () => {
+  const res = await axios.get(`${API_URL}/api/messages/ads`, {
+    withCredentials: true,
+  });
+  return res.data;
+};
+
+export default {
+  getMessages,
+  processMessages,
+  processAllMessages, // جديد
+  getTemplates,
+  createTemplate,
+  getUserAds, // جديد
+};

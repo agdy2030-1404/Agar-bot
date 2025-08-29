@@ -33,7 +33,7 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/bot", botRoutes);
 app.use("/api/ads", adsRoutes);
-app.use("/api/messages", msgRoutes); // إضافة هذا السطر
+app.use('/api/messages', msgRoutes);
 
 const port = process.env.PORT || 3005;
 app.listen(port, () => {

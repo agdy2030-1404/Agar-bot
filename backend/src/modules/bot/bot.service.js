@@ -21,7 +21,10 @@ class BotService {
     this.messageQueue = [];
     this.isProcessingMessages = false;
   }
-
+  // دالة مساعدة لانتظار وقت محدد
+  async wait(timeout) {
+    return new Promise((resolve) => setTimeout(resolve, timeout));
+  }
   // تهيئة المتصفح
   async initBrowser() {
     try {
@@ -55,10 +58,29 @@ class BotService {
     try {
       if (fs.existsSync(this.cookiesPath)) {
         const cookiesString = fs.readFileSync(this.cookiesPath, "utf8");
-        const cookies = JSON.parse(cookiesString);
+        let cookies = JSON.parse(cookiesString);
+
+        console.log(`Loading ${cookies.length} cookies from file`);
+
+        // تصحيح النطاق للكوكيز
+        cookies = cookies.map((cookie) => {
+          // جعل جميع كوكيز aqar.fm صالحة للنطاقات الفرعية
+          if (cookie.domain && cookie.domain.includes("aqar.fm")) {
+            return {
+              ...cookie,
+              domain: "sa.aqar.fm", // النقطة في البداية تجعلها صالحة لجميع النطاقات الفرعية
+            };
+          }
+          return cookie;
+        });
 
         await this.page.setCookie(...cookies);
-        console.log("Cookies loaded successfully");
+        console.log("Cookies loaded successfully with domain fix");
+
+        // التحقق من الكوكيز المحملة
+        const loadedCookies = await this.page.cookies();
+        console.log(`Total cookies in browser: ${loadedCookies.length}`);
+
         return true;
       }
       return false;
@@ -72,7 +94,30 @@ class BotService {
   async saveCookies() {
     try {
       const cookies = await this.page.cookies();
-      fs.writeFileSync(this.cookiesPath, JSON.stringify(cookies, null, 2));
+      console.log(`Saving ${cookies.length} cookies`);
+
+      // تصحيح النطاق وتواريخ الانتهاء
+      const cookiesToSave = cookies.map((cookie) => {
+        let updatedCookie = { ...cookie };
+
+        if (cookie.domain && cookie.domain.includes("aqar.fm")) {
+          updatedCookie.domain = "sa.aqar.fm";
+        }
+
+        // إصلاح تاريخ انتهاء session cookies
+        if (cookie.session && cookie.expires <= 0) {
+          updatedCookie.expires =
+            Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 يوم
+          updatedCookie.session = false;
+        }
+
+        return updatedCookie;
+      });
+
+      fs.writeFileSync(
+        this.cookiesPath,
+        JSON.stringify(cookiesToSave, null, 2)
+      );
       console.log("Cookies saved successfully");
     } catch (error) {
       console.error("Error saving cookies:", error);
@@ -82,8 +127,11 @@ class BotService {
   // تسجيل الدخول إلى موقع عقار
   async loginToAqar() {
     try {
+      if (!this.browser || !this.page) {
+        await this.initBrowser();
+      }
       // الانتقال إلى صفحة التسجيل
-      await this.page.goto("https://aqar.fm", { waitUntil: "networkidle2" });
+      await this.page.goto("https://sa.aqar.fm", { waitUntil: "networkidle2" });
 
       // النقر على زر الحساب لفتح نافذة التسجيل
       await this.page.waitForSelector("button._profile__Ji8ui", {
@@ -120,152 +168,406 @@ class BotService {
       });
       await this.page.click("button.auth_actionButton___fcG7");
 
-      // الانتظار حتى يتم التوجيه إلى الصفحة الرئيسية بعد التسجيل
+      // بعد الانتظار للتوجيه إلى الصفحة الرئيسية
       await this.page.waitForNavigation({
         waitUntil: "networkidle2",
         timeout: 30000,
       });
 
-      // التحقق من نجاح التسجيل عن طريق البحث عن عناصر لوحة المستخدم
-      await this.page.waitForSelector(".sidebar_userInfo__BwI9S", {
-        timeout: 15000,
-      });
+      // الانتظار قليلاً ثم محاولة فتح السايدبار للتحقق
+      await this.wait(3000);
+
+      try {
+        // النقر على أيقونة الحساب لفتح السايدبار
+        await this.page.waitForSelector("button._profile__Ji8ui", {
+          timeout: 10000,
+        });
+        await this.page.click("button._profile__Ji8ui");
+
+        // الانتظار حتى يظهر السايدبار والتحقق من عناصر المستخدم
+        await this.page.waitForSelector(".sidebar_userInfo__BwI9S", {
+          timeout: 15000,
+        });
+      } catch (error) {
+        console.warn(
+          "Could not open sidebar, but login might still be successful"
+        );
+        // محاولة بديلة للتحقق
+        const userLinkVisible = await this.page.evaluate(() => {
+          return !!document.querySelector('[href*="/user/"]');
+        });
+
+        if (!userLinkVisible) {
+          throw new Error("Login verification failed - no user elements found");
+        }
+      }
 
       // حفظ الكوكيز للجلسات القادمة
       await this.saveCookies();
+      // التحقق من الكوكيز
+      const cookiesValid = await this.verifyCookies();
+      if (!cookiesValid) {
+        console.warn("Cookies verification failed after login");
+      }
 
       this.isLoggedIn = true;
-      console.log("Login successful");
+      console.log("Login successful and cookies verified");
       return true;
     } catch (error) {
       console.error("Login failed:", error);
-      throw new Error(`Login failed: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async verifyLoginByOpeningSidebar() {
+    try {
+      // محاولة فتح السايدبار
+      await this.page.waitForSelector("button._profile__Ji8ui", {
+        timeout: 5000,
+      });
+      await this.page.click("button._profile__Ji8ui");
+
+      // الانتظار حتى يظهر السايدبار
+      await this.page.waitForSelector(".sidebar_container___aoT3", {
+        timeout: 5000,
+      });
+
+      // التحقق من وجود معلومات المستخدم
+      const hasUserInfo = await this.page.evaluate(() => {
+        return !!document.querySelector(".sidebar_userInfo__BwI9S");
+      });
+
+      // إغلاق السايدبار بالنقر خارجها (اختياري)
+      try {
+        await this.page.click(".sidebar_overlay__t4lF8", { timeout: 2000 });
+      } catch (e) {
+        // تجاهل الخطأ إذا لم يتمكن من الإغلاق
+      }
+
+      return hasUserInfo;
+    } catch (error) {
+      console.log("Could not verify login by opening sidebar:", error);
+      return false;
     }
   }
 
   // التحقق من حالة التسجيل
   async checkLoginStatus() {
     try {
-      if (!this.isLoggedIn) {
-        // محاولة استخدام الكوكيز المحفوظة
-        const cookiesLoaded = await this.loadCookies();
-        if (cookiesLoaded) {
-          await this.page.goto("https://aqar.fm", {
-            waitUntil: "networkidle2",
+      if (!this.page) throw new Error("البوت غير مشغل بعد");
+
+      // إذا كان مسجلاً الدخول مسبقاً
+      if (this.isLoggedIn) return true;
+
+      // التحقق من الكوكيز أولاً
+      const cookiesLoaded = await this.loadCookies();
+
+      if (cookiesLoaded) {
+        // الذهاب إلى الصفحة الرئيسية
+        await this.page.goto("https://sa.aqar.fm", {
+          waitUntil: "networkidle2",
+          timeout: 30000,
+        });
+
+        // الانتظار لمدة قصيرة للتحميل
+        await this.wait(3000);
+
+        // محاولة فتح السايدبار بالنقر على أيقونة الحساب
+        try {
+          await this.page.waitForSelector("button._profile__Ji8ui", {
+            timeout: 5000,
+          });
+          await this.page.click("button._profile__Ji8ui");
+
+          // الانتظار حتى يظهر السايدبار
+          await this.page.waitForSelector(".sidebar_container___aoT3", {
+            timeout: 5000,
           });
 
-          // التحقق من وجود عناصر المستخدم المسجل دخوله
-          try {
-            await this.page.waitForSelector(".sidebar_userInfo__BwI9S", {
-              timeout: 10000,
-            });
+          // التحقق من وجود عناصر المستخدم المسجل
+          const isLoggedIn = await this.page.evaluate(() => {
+            return !!document.querySelector(".sidebar_userInfo__BwI9S");
+          });
+
+          if (isLoggedIn) {
             this.isLoggedIn = true;
+            console.log("User is logged in (verified by sidebar elements)");
             return true;
-          } catch (e) {
-            this.isLoggedIn = false;
           }
+        } catch (e) {
+          console.log("Sidebar verification failed, trying alternative check");
         }
 
-        // إذا فشل تحميل الكوكيز، قم بتسجيل الدخول يدوياً
-        if (!this.isLoggedIn) {
-          return await this.loginToAqar();
+        // محاولة بديلة للتحقق من التسجيل
+        const alternativeCheck = await this.page.evaluate(() => {
+          // التحقق من وجود رابط يحتوي على /user/ والذي يشير إلى صفحة المستخدم
+          return !!document.querySelector('[href*="/user/"]');
+        });
+
+        if (alternativeCheck) {
+          this.isLoggedIn = true;
+          console.log("User is logged in (verified by user link)");
+          return true;
         }
       }
+
+      // إذا فشل التحقق، حاول التسجيل
+      if (!this.isLoggedIn) {
+        console.log("Not logged in, attempting to login...");
+        return await this.loginToAqar();
+      }
+
       return true;
     } catch (error) {
       console.error("Error checking login status:", error);
       return false;
     }
   }
-
-  async getMyAds() {
+  async verifyCookies() {
     try {
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error("Not logged in");
-      }
+      const cookies = await this.page.cookies();
 
-      // الانتقال إلى صفحة إعلاناتي
-      await this.page.goto("https://aqar.fm/user/ads", {
+      // الكوكيز الأساسية المطلوبة
+      const requiredCookies = ["user", "cf_clearance", "webapp_token"];
+      const hasRequiredCookies = requiredCookies.every((reqCookie) =>
+        cookies.some(
+          (cookie) =>
+            cookie.name === reqCookie && cookie.domain.includes("aqar.fm")
+        )
+      );
+
+      console.log("Cookies verification:", {
+        totalCookies: cookies.length,
+        hasUserCookie: cookies.some((c) => c.name === "user"),
+        hasCfClearance: cookies.some((c) => c.name === "cf_clearance"),
+        hasWebappToken: cookies.some((c) => c.name === "webapp_token"),
+        hasRequiredCookies,
+      });
+
+      return hasRequiredCookies;
+    } catch (error) {
+      console.error("Error verifying cookies:", error);
+      return false;
+    }
+  }
+
+  async debugCookies() {
+    const cookies = await this.page.cookies();
+    console.log("=== CURRENT COOKIES ===");
+
+    cookies.forEach((cookie) => {
+      if (cookie.domain.includes("aqar.fm")) {
+        console.log({
+          name: cookie.name,
+          domain: cookie.domain,
+          value: cookie.value.substring(0, 50) + "...",
+          expires: new Date(cookie.expires * 1000).toLocaleString(),
+          session: cookie.session,
+        });
+      }
+    });
+
+    console.log("======================");
+  }
+
+  async navigateToUserAds() {
+    try {
+      console.log("Navigating to user ads page...");
+
+      // استخدام الرابط الصحيح: user/{id} بدلاً من user/ads
+      await this.page.goto("https://sa.aqar.fm/user/4151645", {
         waitUntil: "networkidle2",
         timeout: 30000,
       });
 
-      // انتظار تحميل الصفحة
+      // انتظار تحميل الصفحة - نستخدم عناصر أكثر عمومية
       await this.page.waitForSelector(
-        ".userListings_listingsContainer__0d7mf",
+        '[class*="listing"], [class*="card"], a[href^="/ad/"]',
         {
           timeout: 15000,
         }
       );
 
-      // استخراج بيانات الإعلانات
+      console.log("Successfully navigated to user ads page");
+      return true;
+    } catch (error) {
+      console.error("Error navigating to user ads:", error);
+
+      // محاولة بديلة: الذهاب إلى الصفحة الرئيسية ثم النقر على البروفايل
+      try {
+        await this.page.goto("https://sa.aqar.fm", {
+          waitUntil: "networkidle2",
+          timeout: 30000,
+        });
+
+        // النقر على زر الحساب
+        await this.page.click("button._profile__Ji8ui");
+        await this.wait(2000);
+
+        // النقر على رابط البروفايل في السايدبار
+        await this.page.click('a[href^="/user/"]');
+        await this.page.waitForSelector('[class*="listing"]', {
+          timeout: 15000,
+        });
+
+        console.log("Navigated to user page via profile click");
+        return true;
+      } catch (fallbackError) {
+        throw new Error(
+          `Failed to navigate to user page: ${error.message}. Fallback also failed: ${fallbackError.message}`
+        );
+      }
+    }
+  }
+
+  async extractAdsData() {
+    try {
+      console.log("Extracting ads data...");
+
       const ads = await this.page.evaluate(() => {
-        const adElements = document.querySelectorAll('a[href^="/ad/"]');
+        // البحث عن جميع روابط الإعلانات بطرق مختلفة
+        const adSelectors = [
+          'a[href^="/ad/"]',
+          'a[href*="/ad/"]',
+          '[class*="listing"] a',
+          '[class*="card"] a',
+        ];
+
+        let adElements = [];
+
+        for (const selector of adSelectors) {
+          const elements = document.querySelectorAll(selector);
+          if (elements.length > 0) {
+            adElements = Array.from(elements);
+            break;
+          }
+        }
+
         const adsData = [];
 
         adElements.forEach((ad) => {
-          // استخراج رقم الإعلان من الرابط
-          const href = ad.getAttribute("href");
-          const adId = href.split("/ad/")[1];
+          try {
+            const href = ad.getAttribute("href");
+            if (!href || !href.includes("/ad/")) return;
 
-          // استخراج العنوان
-          const titleElement = ad.querySelector("h4");
-          const title = titleElement ? titleElement.textContent.trim() : "";
+            // استخراج رقم الإعلان من الرابط
+            const adIdMatch = href.match(/\/ad\/(\d+)/);
+            if (!adIdMatch) return;
 
-          // استخراج السعر
-          const priceElement = ad.querySelector("._price__X51mi span");
-          const price = priceElement ? priceElement.textContent.trim() : "";
+            const adId = adIdMatch[1];
 
-          // استخراج المساحة
-          const areaElement = ad.querySelector("._spec__SIJiK:first-child");
-          const area = areaElement
-            ? areaElement.textContent.replace("م²", "").trim()
-            : "";
+            // استخراج البيانات بطرق أكثر مرونة
+            const titleElement = ad.querySelector(
+              "h4, h3, [class*='title'], [class*='name']"
+            );
+            const priceElement = ad.querySelector(
+              "[class*='price'], [class*='cost'], ._price__X51mi"
+            );
 
-          // استخراج عدد الغرف
-          const roomsElement = Array.from(
-            ad.querySelectorAll("._spec__SIJiK")
-          ).find(
-            (el) =>
-              el.textContent.includes("غرف") ||
-              el.querySelector('img[alt*="غرف"]')
-          );
-          const rooms = roomsElement
-            ? roomsElement.textContent.replace("غرف", "").trim()
-            : "";
+            // استخراج المواصفات
+            const specsContainer = ad.querySelector(
+              "[class*='spec'], [class*='detail'], [class*='info']"
+            );
+            let area = "",
+              rooms = "";
 
-          // استخراج الصورة
-          const imageElement = ad.querySelector("img");
-          const imageUrl = imageElement ? imageElement.src : "";
+            if (specsContainer) {
+              const specElements = specsContainer.querySelectorAll(
+                "[class*='spec'], [class*='item']"
+              );
+              specElements.forEach((spec) => {
+                const text = spec.textContent || "";
+                if (text.includes("م²") || text.includes("المساحة")) {
+                  area = text.replace(/[^\d]/g, "");
+                }
+                if (text.includes("غرف") || text.includes("غرفة")) {
+                  rooms = text.replace(/[^\d]/g, "");
+                }
+              });
+            }
 
-          adsData.push({
-            adId,
-            title,
-            price,
-            area,
-            rooms,
-            imageUrl,
-            link: `https://aqar.fm${href}`,
-            status: "active", // يمكن تحديد الحالة بناءً على العناصر الأخرى
-            views: "0", // سيتم تحديث هذا لاحقاً
-            createdAt: new Date().toISOString(),
-          });
+            // استخراج الصورة
+            const imageElement = ad.querySelector("._imageWrapper__ZiYzs img");
+
+            let imageUrl = "";
+            if (imageElement) {
+              // نعطي الأولوية لـ src لأنه يحمل رابط مباشر
+              imageUrl = imageElement.getAttribute("src");
+
+              // إذا src فاضي أو غير موجود، نستخرج أول رابط من srcset
+              if (!imageUrl && imageElement.srcset) {
+                imageUrl = imageElement.srcset.split(" ")[0];
+              }
+            }
+            // استخراج الحالة
+            let status = "active";
+            const statusElement = ad.querySelector(
+              "[class*='publish'], [class*='status'], [class*='state']"
+            );
+            if (statusElement) {
+              const statusText = statusElement.textContent || "";
+              if (
+                statusText.includes("غير منشور") ||
+                statusText.includes("معلق")
+              ) {
+                status = "inactive";
+              }
+            }
+
+            adsData.push({
+              adId,
+              title: titleElement
+                ? titleElement.textContent.trim()
+                : "لا يوجد عنوان",
+              price: priceElement ? priceElement.textContent.trim() : "",
+              area,
+              rooms,
+              imageUrl,
+              link: `https://sa.aqar.fm${href}`,
+              status,
+            });
+          } catch (error) {
+            console.error("Error extracting ad data:", error);
+          }
         });
 
         return adsData;
       });
 
+      console.log(`Extracted ${ads.length} ads`);
       return ads;
     } catch (error) {
-      console.error("Error fetching ads:", error);
+      console.error("Error extracting ads data:", error);
+      throw error;
+    }
+  }
 
-      // محاولة بديلة إذا فشلت الطريقة الأولى
+  async getMyAds() {
+    try {
+      // التحقق من تسجيل الدخول أولاً
+      const isLoggedIn = await this.checkLoginStatus();
+      if (!isLoggedIn) {
+        throw new Error("Not logged in");
+      }
+
+      // الانتقال إلى صفحة الإعلانات
+      await this.navigateToUserAds();
+
+      // استخراج بيانات الإعلانات
+      const ads = await this.extractAdsData();
+
+      // حفظ screenshot للتحقق
+
+      return ads;
+    } catch (error) {
+      console.error("Error getting ads:", error);
+
+      // محاولة بديلة
       try {
         return await this.alternativeGetAds();
       } catch (fallbackError) {
         throw new Error(
-          `Failed to fetch ads: ${error.message}. Fallback also failed: ${fallbackError.message}`
+          `Failed to get ads: ${error.message}. Fallback also failed: ${fallbackError.message}`
         );
       }
     }
@@ -274,12 +576,13 @@ class BotService {
   // طريقة بديلة لجلب الإعلانات
   async alternativeGetAds() {
     try {
-      await this.page.goto("https://aqar.fm/user/listings", {
+      console.log("Trying alternative method to get ads...");
+
+      await this.page.goto("https://sa.aqar.fm/user/4151645", {
         waitUntil: "networkidle2",
         timeout: 30000,
       });
 
-      // انتظار تحميل الإعلانات
       await this.page.waitForSelector("._listingCard__PoR_B", {
         timeout: 15000,
       });
@@ -314,10 +617,8 @@ class BotService {
             price,
             specs,
             imageUrl,
-            link: `https://aqar.fm${href}`,
+            link: `https://sa.aqar.fm${href}`,
             status: "active",
-            views: "0",
-            createdAt: new Date().toISOString(),
           });
         });
 
@@ -330,210 +631,11 @@ class BotService {
     }
   }
 
-  async alternativeUpdateAd(adId) {
+  async navigateToAdPage(adId) {
     try {
-      console.log(`محاولة التحديث البديلة للإعلان: ${adId}`);
+      console.log(`Navigating to ad page: ${adId}`);
 
-      // الانتقال إلى صفحة إعلاناتي
-      await this.page.goto("https://aqar.fm/user/ads", {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-
-      // البحث عن الإعلان المحدد
-      const adSelector = `a[href*="/ad/${adId}"]`;
-      await this.page.waitForSelector(adSelector, {
-        timeout: 15000,
-      });
-
-      // الانتقال إلى عنصر الإعلان
-      const adElement = await this.page.$(adSelector);
-      if (!adElement) {
-        throw new Error("الإعلان غير موجود في لوحة التحكم");
-      }
-
-      // البحث عن زر التحديث ضمن بطاقة الإعلان
-      const updateButton = await adElement.$('button:has-text("تحديث")');
-      if (!updateButton) {
-        throw new Error("زر التحديث غير موجود في لوحة التحكم");
-      }
-
-      // النقر على زر التحديث
-      await updateButton.click();
-
-      // انتظار ومعالجة نافذة التأكيد
-      await this.page.waitForTimeout(2000);
-
-      const confirmButton = await this.page.$(
-        'button:has-text("تأكيد"), button:has-text("نعم")'
-      );
-      if (confirmButton) {
-        await confirmButton.click();
-      }
-
-      await this.page.waitForTimeout(3000);
-
-      console.log(`تم تحديث الإعلان ${adId} بنجاح من لوحة التحكم`);
-      return {
-        success: true,
-        message: "تم تحديث الإعلان بنجاح من لوحة التحكم",
-        adId,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      throw new Error(`الطريقة البديلة فشلت: ${error.message}`);
-    }
-  }
-
-  // جلب تفاصيل إعلان معين
-  async getAdDetails(adId) {
-    try {
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error("Not logged in");
-      }
-
-      await this.page.goto(`https://aqar.fm/ad/${adId}`, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-
-      // انتظار تحميل التفاصيل
-      await this.page.waitForSelector("._title__eliuu", {
-        timeout: 15000,
-      });
-
-      const adDetails = await this.page.evaluate(() => {
-        // استخراج التفاصيل الرئيسية
-        const titleElement = document.querySelector("._title__eliuu h1");
-        const title = titleElement ? titleElement.textContent.trim() : "";
-
-        const priceElement = document.querySelector("._price__EH7rC");
-        const price = priceElement ? priceElement.textContent.trim() : "";
-
-        const descriptionElement = document.querySelector("._root__lFkcr p");
-        const description = descriptionElement
-          ? descriptionElement.textContent.trim()
-          : "";
-
-        // استخراج التفاصيل الفنية
-        const details = {};
-        const detailElements = document.querySelectorAll(
-          "._newSpecCard__hWWBI ._item___4Sv8"
-        );
-
-        detailElements.forEach((item) => {
-          const labelElement = item.querySelector("._label___qjLO");
-          const valueElement = item.querySelector("._value__yF2Fx");
-
-          if (labelElement && valueElement) {
-            const label = labelElement.textContent.trim();
-            const value = valueElement.textContent.trim();
-            details[label] = value;
-          }
-        });
-
-        // استخراج المميزات
-        const features = [];
-        const featureElements = document.querySelectorAll(
-          "._newSpecCard__hWWBI._boolean__waHdB ._label___qjLO"
-        );
-
-        featureElements.forEach((feature) => {
-          features.push(feature.textContent.trim());
-        });
-
-        // استخراج عدد المشاهدات
-        const viewsElement = Array.from(
-          document.querySelectorAll("._item___4Sv8")
-        ).find((item) => item.textContent.includes("المشاهدات"));
-        const views = viewsElement
-          ? viewsElement.querySelector("span:last-child").textContent.trim()
-          : "0";
-
-        return {
-          title,
-          price,
-          description,
-          details,
-          features,
-          views,
-          lastUpdated: new Date().toISOString(),
-        };
-      });
-
-      return adDetails;
-    } catch (error) {
-      console.error("Error fetching ad details:", error);
-      throw error;
-    }
-  }
-
-  // جلب الإعلانات
-  async getAds() {
-    try {
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error("Not logged in");
-      }
-
-      // الانتقال إلى صفحة الإعلانات
-      await this.page.goto("https://aqar.fm/user/ads", {
-        waitUntil: "networkidle2",
-      });
-
-      // انتظار تحميل الإعلانات
-      await this.page.waitForSelector('[data-testid="ad-item"]', {
-        timeout: 15000,
-      });
-
-      // استخراج بيانات الإعلانات
-      const ads = await this.page.evaluate(() => {
-        const adElements = document.querySelectorAll('[data-testid="ad-item"]');
-        const adsData = [];
-
-        adElements.forEach((ad) => {
-          const title =
-            ad.querySelector(".ad-title")?.textContent?.trim() || "";
-          const price =
-            ad.querySelector(".ad-price")?.textContent?.trim() || "";
-          const status =
-            ad.querySelector(".ad-status")?.textContent?.trim() || "";
-          const views =
-            ad.querySelector(".ad-views")?.textContent?.trim() || "";
-          const link = ad.querySelector("a")?.href || "";
-
-          adsData.push({
-            title,
-            price,
-            status,
-            views,
-            link,
-          });
-        });
-
-        return adsData;
-      });
-
-      return ads;
-    } catch (error) {
-      console.error("Error fetching ads:", error);
-      throw error;
-    }
-  }
-
-  // تحديث إعلان
-  async updateAd(adId) {
-    try {
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error("Not logged in");
-      }
-
-      console.log(`جاري تحديث الإعلان: ${adId}`);
-
-      // الانتقال إلى صفحة الإعلان
-      await this.page.goto(`https://aqar.fm/ad/${adId}`, {
+      await this.page.goto(`https://sa.aqar.fm/ad/${adId}`, {
         waitUntil: "networkidle2",
         timeout: 30000,
       });
@@ -543,296 +645,551 @@ class BotService {
         timeout: 15000,
       });
 
-      // البحث عن زر التحديث
-      const updateButton = await this.page.$('button:has-text("تحديث")');
+      console.log("Successfully navigated to ad page");
+      return true;
+    } catch (error) {
+      console.error("Error navigating to ad page:", error);
+      throw error;
+    }
+  }
 
-      if (!updateButton) {
-        throw new Error("زر التحديث غير موجود");
+  async findUpdateButton() {
+    try {
+      console.log("Looking for update button...");
+
+      // طرق مختلفة للعثور على زر التحديث
+      const buttonSelectors = [
+        // الطريقة 1: البحث بالنص
+        'button:has-text("تحديث")',
+        'button:has-text("تجديد")',
+        '[role="button"]:has-text("تحديث")',
+
+        // الطريقة 2: البحث بالأيقونة
+        'button:has(img[alt*="تحديث"])',
+        'button:has(img[alt*="refresh"])',
+        '[class*="update"] button',
+        '[class*="refresh"] button',
+
+        // الطريقة 3: البحث بالـ class
+        "button._updateBtn__",
+        "button.update-button",
+        '[class*="update"]',
+        '[class*="refresh"]',
+      ];
+
+      let updateButton = null;
+
+      for (const selector of buttonSelectors) {
+        try {
+          if (selector.includes("has-text")) {
+            // استخدام XPath للنص
+            const xpath = `//button[contains(text(), "تحديث") or contains(text(), "تجديد")]`;
+            const buttons = await this.page.$x(xpath);
+            if (buttons.length > 0) {
+              updateButton = buttons[0];
+              break;
+            }
+          } else {
+            updateButton = await this.page.waitForSelector(selector, {
+              timeout: 2000,
+            });
+            if (updateButton) break;
+          }
+        } catch (e) {
+          // continue trying next selector
+        }
       }
 
+      if (!updateButton) {
+        // محاولة أخيرة: البحث في كل الصفحة
+        const allButtons = await this.page.$$("button");
+        for (const button of allButtons) {
+          const text = await this.page.evaluate(
+            (btn) => btn.textContent,
+            button
+          );
+          if (text && (text.includes("تحديث") || text.includes("تجديد"))) {
+            updateButton = button;
+            break;
+          }
+        }
+      }
+
+      if (!updateButton) {
+        throw new Error("زر التحديث غير موجود في الصفحة");
+      }
+
+      console.log("Update button found");
+      return updateButton;
+    } catch (error) {
+      console.error("Error finding update button:", error);
+
+      throw error;
+    }
+  }
+
+  async checkUpdateAvailability(updateButton) {
+    try {
       // التحقق مما إذا كان الزر معطلاً
       const isDisabled = await this.page.evaluate((button) => {
-        return button.disabled || button.getAttribute("disabled") !== null;
+        return (
+          button.disabled ||
+          button.getAttribute("disabled") !== null ||
+          button.classList.contains("disabled") ||
+          button.style.opacity === "0.5"
+        );
       }, updateButton);
 
       if (isDisabled) {
         throw new Error("زر التحديث غير متاح حالياً");
       }
 
+      // التحقق من النص إذا كان يشير إلى عدم التمكن من التحديث
+      const buttonText = await this.page.evaluate((button) => {
+        return button.textContent;
+      }, updateButton);
+
+      if (buttonText.includes("غير متاح") || buttonText.includes("معلق")) {
+        throw new Error("التحديث غير متاح حسب نص الزر");
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Update not available:", error);
+      throw error;
+    }
+  }
+
+  async clickUpdateButton(updateButton) {
+    try {
       // النقر على زر التحديث
       await updateButton.click();
+      console.log("Clicked update button");
 
-      // انتظار ظهور نافذة التأكيد إذا كانت موجودة
+      // الانتظار لظهور نافذة التأكيد إذا كانت موجودة
       try {
         await this.page.waitForSelector('.modal, .dialog, [role="dialog"]', {
           timeout: 5000,
         });
 
         // البحث عن زر التأكيد والنقر عليه
-        const confirmButton = await this.page.$(
-          'button:has-text("تأكيد"), button:has-text("نعم"), button:has-text("موافق")'
+        const confirmButton = await this.page.waitForSelector(
+          'button:has-text("تأكيد"), button:has-text("نعم"), button:has-text("موافق")',
+          { timeout: 5000 }
         );
+
         if (confirmButton) {
           await confirmButton.click();
+          console.log("Clicked confirm button");
         }
       } catch (modalError) {
         // إذا لم تظهر نافذة تأكيد، نستمر
-        console.log("لا توجد نافذة تأكيد للتحديث");
+        console.log("No confirmation modal appeared");
       }
 
       // انتظار اكتمال التحديث
-      await this.page.waitForTimeout(3000);
+      await this.wait(3000);
 
-      // التحقق من نجاح التحديث
-      const successMessage = await this.page.evaluate(() => {
-        const successElement = document.querySelector(
-          ".success, .alert-success, .toast-success"
-        );
-        return successElement ? successElement.textContent.trim() : null;
-      });
+      return true;
+    } catch (error) {
+      console.error("Error clicking update button:", error);
+      throw error;
+    }
+  }
+
+  async verifyUpdateSuccess() {
+    try {
+      // محاولة الانتظار حتى تظهر رسالة النجاح أو toast
+      const maxRetries = 5;
+      let successMessage = null;
+
+      for (let i = 0; i < maxRetries; i++) {
+        successMessage = await this.page.evaluate(() => {
+          const elements = document.querySelectorAll("*");
+          for (let el of elements) {
+            if (el.textContent.includes("تم تحديث الإعلان بنجاح")) {
+              return el.textContent.trim();
+            }
+          }
+          return null;
+        });
+
+        if (successMessage) break;
+
+        await this.wait(1000); // الانتظار ثانية قبل التحقق مرة أخرى
+      }
 
       if (successMessage) {
-        console.log(`تم تحديث الإعلان ${adId} بنجاح: ${successMessage}`);
+        console.log(`Update successful: ${successMessage}`);
+        return true;
+      }
+
+      // fallback: إذا بقينا في صفحة الإعلان نفسها
+      const currentUrl = await this.page.url();
+      if (currentUrl.includes("/ad/")) {
+        console.log("Update completed successfully (fallback)");
+        return true;
+      }
+
+      throw new Error("Unable to verify update success");
+    } catch (error) {
+      console.error("Error verifying update:", error);
+      throw error;
+    }
+  }
+
+  async updateAd(adId) {
+    try {
+      console.log(`Starting update process for ad: ${adId}`);
+
+      // الانتقال إلى صفحة الإعلان
+      await this.navigateToAdPage(adId);
+
+      // البحث عن زر التحديث
+      const updateButton = await this.findUpdateButton();
+
+      // التحقق من توفر التحديث
+      await this.checkUpdateAvailability(updateButton);
+
+      // النقر على الزر
+      await this.clickUpdateButton(updateButton);
+
+      // التحقق من النجاح
+      const success = await this.verifyUpdateSuccess();
+
+      if (success) {
+        console.log(`Ad ${adId} updated successfully`);
         return {
           success: true,
           message: "تم تحديث الإعلان بنجاح",
           adId,
           timestamp: new Date().toISOString(),
         };
-      } else {
-        // محاولة التحقق بطريقة أخرى
-        await this.page.waitForTimeout(2000);
-        const currentUrl = this.page.url();
-        if (currentUrl.includes("/ad/") || currentUrl.includes("/user/ads")) {
-          console.log(`تم تحديث الإعلان ${adId} بنجاح`);
-          return {
-            success: true,
-            message: "تم تحديث الإعلان بنجاح",
-            adId,
-            timestamp: new Date().toISOString(),
-          };
-        } else {
-          throw new Error("فشل في التحقق من نجاح التحديث");
-        }
       }
+
+      throw new Error("Update completed but verification failed");
     } catch (error) {
-      console.error(`فشل في تحديث الإعلان ${adId}:`, error);
-
-      // محاولة بديلة باستخدام لوحة التحكم
-      try {
-        return await this.alternativeUpdateAd(adId);
-      } catch (fallbackError) {
-        throw new Error(
-          `فشل في تحديث الإعلان: ${error.message}. الطريقة البديلة فشلت أيضاً: ${fallbackError.message}`
-        );
-      }
+      console.error(`Failed to update ad ${adId}:`, error);
+      throw new Error(`فشل في تحديث الإعلان: ${error.message}`);
     }
   }
 
-  addToUpdateQueue(adId, priority = "normal") {
-    const existingItem = this.updateQueue.find((item) => item.adId === adId);
-
-    if (!existingItem) {
-      this.updateQueue.push({
-        adId,
-        priority,
-        addedAt: new Date(),
-        attempts: 0,
-        lastAttempt: null,
-      });
-      console.log(`تم إضافة الإعلان ${adId} إلى قائمة الانتظار`);
-    }
-
-    // بدء معالجة الطابور إذا لم يكن يعمل
-    if (!this.isProcessingQueue) {
-      this.processUpdateQueue();
-    }
-  }
-
-  async processUpdateQueue() {
-    if (this.isProcessingQueue || this.updateQueue.length === 0) {
-      return;
-    }
-
-    this.isProcessingQueue = true;
-
+  async validateAdOwnership(adId, forceCheck = false) {
     try {
-      // ترتيب الطابور حسب الأولوية
-      this.updateQueue.sort((a, b) => {
-        const priorityOrder = { high: 0, normal: 1, low: 2 };
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      });
+      // إذا لم نكن بحاجة للتحقق القوي، نعود مباشرة
+      if (!forceCheck) {
+        console.log(`Skipping ownership validation for ad: ${adId}`);
+        return true;
+      }
 
-      while (this.updateQueue.length > 0) {
-        const queueItem = this.updateQueue[0];
+      // التحقق من قاعدة البيانات أولاً
+      const userAds = await Ad.find({ userId: this.userId, isUserAd: true });
+      const isOwned = userAds.some((ad) => ad.adId === adId);
 
-        try {
-          // تحديث الإعلان
-          const result = await this.updateAd(queueItem.adId);
+      if (isOwned) {
+        console.log(`Ad ${adId} is owned by user`);
+        return true;
+      }
 
-          if (result.success) {
-            // إزالة من الطابور عند النجاح
-            this.updateQueue.shift();
-            console.log(
-              `تم تحديث الإعلان ${queueItem.adId} وإزالته من الطابور`
-            );
-          } else {
-            // زيادة عدد المحاولات
-            queueItem.attempts++;
-            queueItem.lastAttempt = new Date();
+      // إذا لم يكن في قاعدة البيانات، التحقق من الموقع
+      console.log(`Checking ad ownership on website: ${adId}`);
+      await this.navigateToUserAds();
+      const currentUserAds = await this.extractAdsData();
 
-            if (queueItem.attempts >= 3) {
-              // إزالة من الطابور بعد 3 محاولات فاشلة
-              this.updateQueue.shift();
-              console.log(
-                `تم إزالة الإعلان ${queueItem.adId} بعد 3 محاولات فاشلة`
-              );
-            } else {
-              // نقل إلى نهاية الطابور للمحاولة لاحقاً
-              this.updateQueue.push(this.updateQueue.shift());
-            }
-          }
-        } catch (error) {
-          console.error(`خطأ في معالجة الإعلان ${queueItem.adId}:`, error);
-          queueItem.attempts++;
-          queueItem.lastAttempt = new Date();
+      return currentUserAds.some((ad) => ad.adId === adId);
+    } catch (error) {
+      console.error("Error validating ad ownership:", error);
+      return false;
+    }
+  }
 
-          if (queueItem.attempts >= 3) {
-            this.updateQueue.shift();
-          } else {
-            this.updateQueue.push(this.updateQueue.shift());
-          }
+  async navigateToAdCommunicationRequests(
+    adId,
+    userId = null,
+    skipValidation = false
+  ) {
+    try {
+      console.log(`Navigating to communication requests for ad: ${adId}`);
+
+      // التحقق من صحة adId
+      if (!adId || isNaN(adId)) {
+        throw new Error(`Invalid adId: ${adId}`);
+      }
+
+      // إذا كان userId متوفراً، التحقق من ملكية الإعلان (مع إمكانية تخطي التحقق)
+      if (userId && !skipValidation) {
+        const isValid = await this.validateAdOwnership(adId, true);
+        if (!isValid) {
+          throw new Error(`Ad ${adId} does not belong to user`);
         }
-
-        // انتظار عشوائي بين التحديثات (1-5 دقائق)
-        const randomWait = Math.floor(Math.random() * 4 * 60000) + 60000;
-        await this.page.waitForTimeout(randomWait);
-      }
-    } finally {
-      this.isProcessingQueue = false;
-    }
-  }
-
-  // جدولة التحديثات التلقائية
-  scheduleAutoUpdates(ads, minHours = 20, maxHours = 48) {
-    for (const ad of ads) {
-      const randomHours =
-        Math.floor(Math.random() * (maxHours - minHours + 1)) + minHours;
-      const updateTime = new Date(Date.now() + randomHours * 60 * 60 * 1000);
-
-      setTimeout(() => {
-        this.addToUpdateQueue(ad.adId, "normal");
-      }, randomHours * 60 * 60 * 1000);
-
-      console.log(`تم جدولة تحديث الإعلان ${ad.adId} بعد ${randomHours} ساعة`);
-    }
-  }
-  async fetchNewMessages() {
-    try {
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error("Not logged in");
       }
 
-      console.log("جاري جلب الرسائل الجديدة...");
+      // بناء الرابط المباشر
+      const targetUrl = `https://sa.aqar.fm/listings/${adId}/communication-requests`;
+      console.log(`Navigating to: ${targetUrl}`);
 
-      // الانتقال إلى صفحة طلبات التواصل
-      await this.page.goto("https://aqar.fm/user/communication-requests", {
+      await this.page.goto(targetUrl, {
         waitUntil: "networkidle2",
-        timeout: 30000,
+        timeout: 60000,
       });
+
+      // التحقق من أننا في الصفحة الصحيحة
+      const currentUrl = await this.page.url();
+      if (!currentUrl.includes(`/listings/${adId}/communication-requests`)) {
+        console.warn(`Possible navigation issue. Current URL: ${currentUrl}`);
+
+        // محاولة التصحيح التلقائي
+        const correctAdId = await this.extractAdIdFromCommunicationPage();
+        if (correctAdId && correctAdId !== adId) {
+          console.log(`Correcting adId from ${adId} to ${correctAdId}`);
+          return await this.navigateToAdCommunicationRequests(
+            correctAdId,
+            userId,
+            skipValidation
+          );
+        }
+      }
 
       // انتظار تحميل الصفحة
-      await this.page.waitForSelector("._communications__Dx82y", {
-        timeout: 15000,
-      });
+      await this.page.waitForSelector(
+        "._communications__Dx82y, ._requestCard__uj_k6",
+        {
+          timeout: 20000,
+        }
+      );
 
-      // استخراج الرسائل
+      console.log("Successfully navigated to communication requests");
+      return true;
+    } catch (error) {
+      console.error("Error navigating to communication requests:", error);
+      throw error;
+    }
+  }
+
+  async extractNewMessages() {
+    try {
+      console.log("Extracting messages from communication page...");
+
       const messages = await this.page.evaluate(() => {
         const messageCards = document.querySelectorAll("._requestCard__uj_k6");
         const messagesData = [];
 
-        messageCards.forEach((card) => {
-          // استخراج اسم المرسل
-          const nameElement = card.querySelector("p:first-child");
-          const senderName = nameElement ? nameElement.textContent.trim() : "";
+        messageCards.forEach((card, index) => {
+          try {
+            // استخراج بيانات المرسل
+            const senderElement = card.querySelector("p:first-child");
+            const senderName = senderElement
+              ? senderElement.textContent.trim()
+              : "Unknown";
 
-          // استخراج التاريخ
-          const dateElement = card.querySelector("p:last-child");
-          const receivedDate = dateElement
-            ? dateElement.textContent.trim()
-            : "";
+            // استخراج التاريخ
+            const dateElement = card.querySelector("p:not(:first-child)");
+            const receivedDate = dateElement
+              ? dateElement.textContent.trim()
+              : "";
 
-          // استخراج حالة الرسالة (غير مقروءة)
-          const statusElement = card.querySelector("._status__cGrCS");
-          const isNew =
-            statusElement &&
-            !statusElement.classList.contains("_contacted__ldMj3");
+            // التحقق من حالة الرسالة (جديدة/تم الرد)
+            const statusElement = card.querySelector(
+              "._status__cGrCS, ._contacted__ldMj3"
+            );
+            const isNew =
+              !statusElement ||
+              !statusElement.textContent.includes("تم التواصل");
 
-          // استخراج زر الواتساب
-          const whatsappButton = card.querySelector("button");
-          const hasWhatsapp =
-            whatsappButton && whatsappButton.textContent.includes("واتساب");
+            // التحقق من توفر الواتساب
+            const whatsappButton = card.querySelector(
+              'button:has-text("واتساب")'
+            );
+            const isWhatsappAvailable =
+              !!whatsappButton && !whatsappButton.disabled;
 
-          if (isNew) {
+            // محاولة استخراج adId من الصفحة
+            let adId = null;
+            const currentUrl = window.location.href;
+            const urlMatch = currentUrl.match(/\/listings\/(\d+)/);
+            if (urlMatch) adId = urlMatch[1];
+
             messagesData.push({
+              messageId: `msg-${index}-${Date.now()}`,
               senderName,
               receivedDate,
-              hasWhatsapp,
-              isNew: true,
+              isNew,
+              isWhatsappAvailable,
+              adId, // إضافة adId إلى بيانات الرسالة
             });
+          } catch (error) {
+            console.error("Error extracting message:", error);
           }
         });
 
         return messagesData;
       });
 
-      console.log(`تم العثور على ${messages.length} رسالة جديدة`);
+      console.log(`Extracted ${messages.length} messages`);
       return messages;
     } catch (error) {
-      console.error("فشل في جلب الرسائل:", error);
+      console.error("Error extracting messages:", error);
       throw error;
     }
   }
 
-  // الرد على رسالة عبر الواتساب
-  async replyViaWhatsapp(message, replyText) {
+  async extractAdIdFromCommunicationPage() {
     try {
-      console.log(`جاري الرد على ${message.senderName} عبر الواتساب...`);
+      console.log("Extracting adId from communication requests page...");
 
-      // الانتقال إلى صفحة طلبات التواصل
-      await this.page.goto("https://aqar.fm/user/communication-requests", {
-        waitUntil: "networkidle2",
-        timeout: 30000,
+      const adId = await this.page.evaluate(() => {
+        // الطريقة 1: من الرابط الحالي (الأكثر موثوقية)
+        const currentUrl = window.location.href;
+        const adIdMatch = currentUrl.match(
+          /\/listings\/(\d+)\/communication-requests/
+        );
+        if (adIdMatch) return adIdMatch[1];
+
+        // الطريقة 2: من عناصر الصفحة (breadcrumb أو عناوين)
+        const breadcrumbLinks = document.querySelectorAll(
+          'a[href*="/ad/"], a[href*="/listings/"]'
+        );
+        for (const link of breadcrumbLinks) {
+          const href = link.getAttribute("href");
+          const match = href.match(/\/(\d+)/);
+          if (match) return match[1];
+        }
+
+        // الطريقة 3: من عناوين الصفحة أو البيانات
+        const pageTitle = document.title;
+        const titleMatch = pageTitle.match(/(\d{6,})/); // البحث عن أرقام طويلة
+        if (titleMatch) return titleMatch[1];
+
+        // الطريقة 4: من بيانات JavaScript في الصفحة
+        const scripts = document.querySelectorAll("script");
+        for (const script of scripts) {
+          const scriptContent = script.textContent || "";
+          const matches =
+            scriptContent.match(/"adId":\s*"(\d+)"/) ||
+            scriptContent.match(/"listingId":\s*"(\d+)"/);
+          if (matches) return matches[1];
+        }
+
+        return null;
       });
 
-      // انتظار تحميل الصفحة
-      await this.page.waitForSelector("._communications__Dx82y", {
-        timeout: 15000,
-      });
+      if (adId) {
+        console.log(`Extracted adId from communication page: ${adId}`);
 
-      // البحث عن رسالة المرسل المحدد
-      const senderSelector = `._requestCard__uj_k6:has(p:contains("${message.senderName}"))`;
-      await this.page.waitForSelector(senderSelector, {
-        timeout: 10000,
-      });
-
-      // النقر على زر الواتساب
-      const whatsappButton = await this.page.$(`${senderSelector} button`);
-      if (!whatsappButton) {
-        throw new Error("زر الواتساب غير موجود");
+        // التحقق من أن هذا الإعلان مملوك للمستخدم
+        const isValid = await this.validateAdOwnership(adId);
+        if (isValid) {
+          return adId;
+        } else {
+          throw new Error(`الإعلان ${adId} لا ينتمي إلى المستخدم`);
+        }
       }
 
-      // فتح نافذة الواتساب
+      throw new Error("Could not extract adId from communication page");
+    } catch (error) {
+      console.error("Error extracting adId from communication page:", error);
+
+      // محاولة بديلة: العودة إلى صفحة الإعلانات واستخراج من هناك
+      try {
+        await this.navigateToUserAds();
+        const userAds = await this.extractAdsData();
+        if (userAds.length > 0) {
+          console.log(`Using first user ad: ${userAds[0].adId}`);
+          return userAds[0].adId;
+        }
+      } catch (fallbackError) {
+        console.error("Fallback also failed:", fallbackError);
+      }
+
+      throw error;
+    }
+  }
+
+  async extractAdIdFromAdPage() {
+    try {
+      console.log("Extracting adId from ad page...");
+
+      const adId = await this.page.evaluate(() => {
+        // من الرابط الحالي
+        const currentUrl = window.location.href;
+        const adIdMatch = currentUrl.match(/\/ad\/(\d+)/);
+        if (adIdMatch) return adIdMatch[1];
+
+        // من عناصر الصفحة
+        const adIdElement = document.querySelector(
+          "[data-ad-id], [data-listing-id]"
+        );
+        if (adIdElement) {
+          return (
+            adIdElement.getAttribute("data-ad-id") ||
+            adIdElement.getAttribute("data-listing-id")
+          );
+        }
+
+        return null;
+      });
+
+      if (adId) {
+        console.log(`Extracted adId from ad page: ${adId}`);
+        return adId;
+      }
+
+      throw new Error("Could not extract adId from ad page");
+    } catch (error) {
+      console.error("Error extracting adId from ad page:", error);
+      throw error;
+    }
+  }
+
+  // دالة للتحقق من ملكية الإعلان
+  async validateAdOwnership(adId) {
+    try {
+      // التحقق من قاعدة البيانات أولاً
+      const userAds = await Ad.find({ userId: this.userId, isUserAd: true });
+      const isOwned = userAds.some((ad) => ad.adId === adId);
+
+      if (isOwned) {
+        console.log(`Ad ${adId} is owned by user`);
+        return true;
+      }
+
+      // إذا لم يكن في قاعدة البيانات، التحقق من الموقع
+      console.log(`Checking ad ownership on website: ${adId}`);
+      await this.navigateToUserAds();
+      const currentUserAds = await this.extractAdsData();
+
+      return currentUserAds.some((ad) => ad.adId === adId);
+    } catch (error) {
+      console.error("Error validating ad ownership:", error);
+      return false;
+    }
+  }
+
+  async clickWhatsappButton(messageElement) {
+    try {
+      console.log("Clicking WhatsApp button...");
+
+      // البحث عن زر الواتساب ضمن عنصر الرسالة المحدد
+      const whatsappButton = await messageElement.$(
+        'button:has-text("واتساب")'
+      );
+
+      if (!whatsappButton) {
+        throw new Error("زر الواتساب غير موجود في هذه الرسالة");
+      }
+
+      // النقر على زر الواتساب
       await whatsappButton.click();
 
-      // الانتظار لتحميل الواتساب
-      await this.page.waitForTimeout(5000);
+      // الانتظار لفتح نافذة الواتساب
+      await this.wait(3000);
 
-      // الحصول على جميع Tabs المفتوحة
+      // الحصول على جميع النوافذ/Tabs المفتوحة
       const pages = await this.browser.pages();
-      const whatsappPage = pages.find((page) =>
-        page.url().includes("web.whatsapp.com")
+      const whatsappPage = pages.find(
+        (page) =>
+          page.url().includes("web.whatsapp.com") ||
+          page.url().includes("api.whatsapp.com")
       );
 
       if (!whatsappPage) {
@@ -841,6 +1198,18 @@ class BotService {
 
       // الانتقال إلى صفحة الواتساب
       await whatsappPage.bringToFront();
+
+      console.log("WhatsApp opened successfully");
+      return whatsappPage;
+    } catch (error) {
+      console.error("Error clicking WhatsApp button:", error);
+      throw error;
+    }
+  }
+
+  async sendWhatsappMessage(whatsappPage, message) {
+    try {
+      console.log("Sending WhatsApp message...");
 
       // انتظار تحميل الواتساب
       await whatsappPage.waitForSelector(
@@ -855,103 +1224,52 @@ class BotService {
         'div[contenteditable="true"][data-tab="10"]'
       );
       await messageInput.click();
-      await whatsappPage.keyboard.type(replyText);
+
+      // مسح أي نص موجود أولاً
+      await whatsappPage.keyboard.down("Control");
+      await whatsappPage.keyboard.press("A");
+      await whatsappPage.keyboard.up("Control");
+      await whatsappPage.keyboard.press("Backspace");
+
+      // كتابة الرسالة
+      await whatsappPage.keyboard.type(message);
 
       // إرسال الرسالة
       await whatsappPage.keyboard.press("Enter");
 
-      console.log(`تم إرسال الرد إلى ${message.senderName}`);
+      console.log("Message sent successfully");
 
       // العودة إلى الصفحة الرئيسية
       await this.page.bringToFront();
 
       return true;
     } catch (error) {
-      console.error(`فشل في الرد عبر الواتساب:`, error);
+      console.error("Error sending WhatsApp message:", error);
 
-      // محاولة بديلة
-      try {
-        return await this.alternativeWhatsappReply(message, replyText);
-      } catch (fallbackError) {
-        throw new Error(
-          `فشل في الرد عبر الواتساب: ${error.message}. الطريقة البديلة فشلت أيضاً: ${fallbackError.message}`
-        );
-      }
+      // العودة إلى الصفحة الرئيسية في حالة الخطأ
+      await this.page.bringToFront();
+      throw error;
     }
   }
 
-  // طريقة بديلة للرد عبر الواتساب
-  async alternativeWhatsappReply(message, replyText) {
-    try {
-      console.log(`محاولة بديلة للرد على ${message.senderName}...`);
-
-      // فتح رابط واتساب مباشر (إذا كان الرقم متوفراً)
-      // هذه طريقة بديلة إذا فشلت الطريقة الأولى
-      await this.page.goto("https://web.whatsapp.com", {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-
-      // انتظار تحميل الواتساب
-      await this.page.waitForSelector(
-        'div[contenteditable="true"][data-tab="10"]',
-        {
-          timeout: 15000,
-        }
-      );
-
-      // البحث عن المحادثة (هنا تحتاج إلى معرفة رقم الهاتف)
-      // هذه مجرد مثال - تحتاج إلى تكييفها حسب بياناتك
-      const searchInput = await this.page.$(
-        'div[contenteditable="true"][data-tab="10"]'
-      );
-      await searchInput.click();
-      await this.page.keyboard.type(message.senderName);
-      await this.page.waitForTimeout(2000);
-
-      // اختيار المحادثة الأولى
-      const firstChat = await this.page.$('div[role="listitem"]');
-      if (firstChat) {
-        await firstChat.click();
-        await this.page.waitForTimeout(2000);
-
-        // كتابة الرسالة
-        const messageInput = await this.page.$(
-          'div[contenteditable="true"][data-tab="10"]'
-        );
-        await messageInput.click();
-        await this.page.keyboard.type(replyText);
-
-        // إرسال الرسالة
-        await this.page.keyboard.press("Enter");
-
-        console.log(`تم إرسال الرد البديل إلى ${message.senderName}`);
-        return true;
-      }
-
-      throw new Error("لم يتم العثور على المحادثة");
-    } catch (error) {
-      throw new Error(`الطريقة البديلة فشلت: ${error.message}`);
-    }
-  }
-
-  // اختيار قالب الرد المناسب
   async selectReplyTemplate(message) {
-    // تحليل محتوى الرسالة لتحديد الرد المناسب
-    const messageContent = message.messageContent.toLowerCase();
-
-    // قوالب الردود الافتراضية
+    // قوالب الردود الجاهزة
     const templates = {
-      greeting: "السلام عليكم، شكراً لتواصلكم. كيف يمكنني مساعدتك؟",
+      greeting:
+        "السلام عليكم ورحمة الله وبركاته 🌹\nشكراً لتواصلكم، كيف يمكنني مساعدتك؟",
       price:
-        "أهلاً وسهلاً، السعر المذكور في الإعلان نهائي وقابل للتفاوض حسب الظروف.",
-      availability: "نعم، الإعلان لا يزال متاح. هل ترغب في الترتيب لمعاينة؟",
+        "أهلاً وسهلاً بك 🌹\nالسعر المذكور في الإعلان نهائي وقابل للتفاوض حسب الظروف.\nهل ترغب في معرفة المزيد من التفاصيل؟",
+      availability:
+        "أهلاً بك 🌹\nنعم، الإعلان لا يزال متاح.\nهل ترغب في الترتيب لمعاينة أو لديك استفسار محدد؟",
       location:
-        "المكان موضح في الخريطة في الإعلان. هل تحتاج إلى اتجاهات محددة؟",
-      default: "شكراً لاهتمامك بالإعلان. هل لديك استفسار محدد؟",
+        "وعليكم السلام ورحمة الله 🌹\nالمكان موضح في الخريطة في الإعلان.\nهل تحتاج إلى اتجاهات محددة أو معلومات عن الموقع؟",
+      default:
+        "السلام عليكم 🌹\nشكراً لاهتمامك بالإعلان.\nهل لديك استفسار محدد أو ترغب في معرفة المزيد من التفاصيل؟",
     };
 
-    // تحديد نوع الاستفسار
+    // تحليل محتوى الرسالة لتحديد الرد المناسب
+    const messageContent = message.messageContent?.toLowerCase() || "";
+
     if (
       messageContent.includes("سعر") ||
       messageContent.includes("ثمن") ||
@@ -981,87 +1299,108 @@ class BotService {
     }
   }
 
-  // معالجة الرسائل الجديدة
-  async processNewMessages() {
+  async processNewMessages(adId = null, userId = null) {
     try {
-      const messages = await this.fetchNewMessages();
+      console.log(`Processing messages${adId ? " for ad: " + adId : ""}`);
 
-      for (const message of messages.filter((m) => m.isNew)) {
-        try {
-          // اختيار قالب الرد
-          const replyText = await this.selectReplyTemplate(message);
+      if (!this.page) {
+        throw new Error("الصفحة غير مفتوحة، الرجاء تشغيل الروبوت أولاً");
+      }
 
-          // الرد عبر الواتساب
-          const success = await this.replyViaWhatsapp(message, replyText);
+      let targetAdId = adId;
+      this.userId = userId; // حفظ userId للتحقق لاحقاً
 
-          if (success) {
-            console.log(`تم الرد على ${message.senderName} بنجاح`);
+      // إذا لم يتم توفير adId، نستخرجه من الصفحة الحالية
+      const currentUrl = await this.page.url();
+      console.log("Current URL:", currentUrl);
 
-            // هنا يمكنك تحديث حالة الرسالة في قاعدة البيانات
-            // await Message.updateOne({ messageId: message.id }, { status: 'replied' });
+      if (!targetAdId) {
+        if (currentUrl.includes("/communication-requests")) {
+          targetAdId = await this.extractAdIdFromCommunicationPage();
+        } else if (currentUrl.includes("/ad/")) {
+          targetAdId = await this.extractAdIdFromAdPage();
+        } else {
+          await this.navigateToUserAds();
+          const userAds = await this.extractAdsData();
+          if (userAds.length > 0) {
+            targetAdId = userAds[0].adId;
+            console.log(`Using first user ad: ${targetAdId}`);
+          } else {
+            throw new Error("No user ads found");
           }
-
-          // انتظار عشوائي بين الردود (1-3 دقائق)
-          const randomWait = Math.floor(Math.random() * 2 * 60000) + 60000;
-          await this.page.waitForTimeout(randomWait);
-        } catch (error) {
-          console.error(`فشل في معالجة رسالة ${message.senderName}:`, error);
         }
       }
 
-      return { processed: messages.length, success: true };
-    } catch (error) {
-      console.error("فشل في معالجة الرسائل:", error);
-      return { processed: 0, success: false, error: error.message };
-    }
-  }
+      // الانتقال إلى صفحة طلبات التواصل مع تخطي التحقق من الملكية
+      await this.navigateToAdCommunicationRequests(targetAdId, userId, true);
+      const messages = await this.extractNewMessages();
+      const newMessages = messages.filter(
+        (msg) => msg.isNew && msg.isWhatsappAvailable
+      );
 
-  // إضافة رسالة إلى طابور المعالجة
-  addToMessageQueue(message, priority = "normal") {
-    this.messageQueue.push({
-      ...message,
-      priority,
-      addedAt: new Date(),
-      attempts: 0,
-    });
-    console.log(`تم إضافة رسالة من ${message.senderName} إلى طابور المعالجة`);
-  }
+      console.log(
+        `Found ${newMessages.length} new messages for ad ${targetAdId}`
+      );
 
-  // معالجة طابور الرسائل
-  async processMessageQueue() {
-    if (this.isProcessingMessages || this.messageQueue.length === 0) {
-      return;
-    }
-
-    this.isProcessingMessages = true;
-
-    try {
-      while (this.messageQueue.length > 0) {
-        const message = this.messageQueue[0];
-
+      const results = [];
+      for (const message of newMessages) {
         try {
           const result = await this.processSingleMessage(message);
+          results.push({
+            ...result,
+            adId: targetAdId,
+          });
 
-          if (result.success) {
-            this.messageQueue.shift();
-          } else {
-            message.attempts++;
-            if (message.attempts >= 2) {
-              this.messageQueue.shift();
-            }
-          }
+          await this.wait(2000);
         } catch (error) {
-          console.error(`خطأ في معالجة الرسالة:`, error);
-          message.attempts++;
-          if (message.attempts >= 2) {
-            this.messageQueue.shift();
-          }
+          console.error(`Failed to process message:`, error);
+          results.push({
+            success: false,
+            messageId: message.messageId,
+            error: error.message,
+            adId: targetAdId,
+          });
         }
-
-        await this.page.waitForTimeout(30000); // انتظار 30 ثانية بين الرسائل
       }
-    } finally {
-      this.isProcessingMessages = false;
+
+      return {
+        processed: newMessages.length,
+        success: results.filter((r) => r.success).length,
+        failed: results.filter((r) => !r.success).length,
+        details: results,
+        adId: targetAdId,
+      };
+    } catch (error) {
+      console.error("Error processing messages:", error);
+      throw error;
+    }
+  }
+
+  async debugCurrentPage() {
+    try {
+      const pageInfo = await this.page.evaluate(() => {
+        return {
+          url: window.location.href,
+          title: document.title,
+          hasCommunications: !!document.querySelector(
+            "._communications__Dx82y"
+          ),
+          requestCards: document.querySelectorAll("._requestCard__uj_k6")
+            .length,
+          allButtons: Array.from(document.querySelectorAll("button")).map(
+            (btn) => ({
+              text: btn.textContent,
+              disabled: btn.disabled,
+            })
+          ),
+        };
+      });
+
+      console.log("Page debug info:", pageInfo);
+      return pageInfo;
+    } catch (error) {
+      console.error("Error debugging page:", error);
+      return null;
     }
   }
   // إيقاف الروبوت
@@ -1080,5 +1419,4 @@ class BotService {
     }
   }
 }
-
 export default new BotService();

@@ -1,83 +1,49 @@
+import axios from "axios";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-const handleResponse = async (response) => {
-  if (!response.ok) {
-    let errorData;
+const api = axios.create({
+  baseURL: API_URL,
+  withCredentials: true,
+});
+
+export const adService = {
+  // جلب إعلانات المستخدم مع التحقق
+  getMyAds: async () => {
     try {
-      errorData = await response.json();
-    } catch {
-      errorData = { message: `HTTP error! status: ${response.status}` };
-    }
-    throw new Error(errorData.message || "Request failed");
-  }
-  return response.json();
-};
+      // التحقق من حالة الروبوت أولاً
+      const statusResponse = await botService.getStatus();
 
-export const getAds = async (params = {}) => {
-  try {
-    const query = new URLSearchParams(params).toString();
-    const response = await fetch(`${API_URL}/api/ads/getAds?${query}`, {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-    const data = await handleResponse(response);
-    return { ads: data.ads, pagination: data.pagination };
-  } catch (error) {
-    console.error("Fetch ads error:", error);
-    throw error;
-  }
-};
-
-export const renewAd = async (id) => {
-  try {
-    const response = await fetch(`${API_URL}/api/ads/${id}/renew`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-    return await handleResponse(response);
-  } catch (error) {
-    console.error("Renew ad error:", error);
-    throw new Error(error.message || "Failed to renew ad");
-  }
-};
-
-export const renewAllAds = async () => {
-  try {
-    const response = await fetch(`${API_URL}/api/ads/renew-all`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-    return await handleResponse(response);
-  } catch (error) {
-    console.error("Renew all ads error:", error);
-    throw new Error(error.message || "Failed to renew all ads");
-  }
-};
-
-export const syncAds = async (platform) => {
-  try {
-    const response = await fetch(
-      `${API_URL}/api/ads/sync?platform=${platform}`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      if (!statusResponse.data.isRunning) {
+        throw new Error("الروبوت غير نشط");
       }
-    );
-    return await handleResponse(response);
-  } catch (error) {
-    console.error("Sync ads error:", error);
-    throw new Error(error.message || "Failed to sync ads");
-  }
+
+      if (!statusResponse.data.isLoggedIn) {
+        throw new Error("المستخدم غير مسجل");
+      }
+
+      // فقط إذا كان كل شيء جيداً، نجلب الإعلانات
+      return api.get("/api/ads");
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // جلب إعلانات من الموقع وحفظها
+  fetchAdsFromSite: () => api.get("/api/ads/fetch"),
+
+  // تفاصيل إعلان معين
+  getAdDetails: (adId) => api.get(`/api/ads/${adId}`),
+
+  // تحديث إعلان
+  updateAd: (adId) => api.put(`/api/ads/${adId}/update`), // ✅ المسار الصحيح
+
+  // جدولة التحديثات
+  scheduleAdUpdates: (adId, scheduleData) =>
+    api.post(`/api/ads/${adId}/schedule`, scheduleData),
+
+  // إحصائيات الإعلانات
+  getAdStats: () => api.get("/api/ads/stats"),
 };
+
+export default adService;

@@ -1,10 +1,12 @@
-import ProtectedRoute from "@/components/ProtectedRoute";
-import Dashboard from "@/components/dashboard/dashboard";
+'use client';
+
+import DashboardComp from '@/components/dashboard/Dashboard.jsx';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 export default function DashboardPage() {
   return (
     <ProtectedRoute>
-      <Dashboard />
+      <DashboardComp />
     </ProtectedRoute>
   );
 }

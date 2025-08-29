@@ -4,7 +4,7 @@ import { useSelector } from "react-redux";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-export default function ProtectedRoute({ children }) {
+export const ProtectedRoute = ({ children }) => {
   const { currentUser } = useSelector((state) => state.user);
   const router = useRouter();
 
@@ -15,4 +15,4 @@ export default function ProtectedRoute({ children }) {
   }, [currentUser, router]);
 
   return currentUser ? children : null;
-}
+};

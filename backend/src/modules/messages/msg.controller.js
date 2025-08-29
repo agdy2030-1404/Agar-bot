@@ -1,128 +1,136 @@
-// modules/messages/msg.controller.js
-import Message from './msg.model.js';
-import Template from './template.model.js';
-import botService from '../bot/bot.service.js';
-import { errorHandler } from '../../utils/error.js';
-
-export const fetchMessages = async (req, res, next) => {
-    try {
-        const userId = req.user.id;
-
-        // تشغيل الروبوت إذا لم يكن نشطاً
-        if (!botService.browser) {
-            await botService.initBrowser();
-        }
-
-        // التحقق من تسجيل الدخول
-        const isLoggedIn = await botService.checkLoginStatus();
-        if (!isLoggedIn) {
-            await botService.loginToAqar();
-        }
-
-        // جلب الرسائل الجديدة
-        const result = await botService.processNewMessages();
-
-        res.status(200).json({
-            success: result.success,
-            message: `تم معالجة ${result.processed} رسالة`,
-            data: result
-        });
-
-    } catch (error) {
-        next(errorHandler(500, `فشل في جلب الرسائل: ${error.message}`));
-    }
-};
+import Message from "./msg.model.js";
+import Template from "./template.model.js";
+import { errorHandler } from "../../utils/error.js";
+import botService from "../bot/bot.service.js";
 
 export const getMessages = async (req, res, next) => {
-    try {
-        const userId = req.user.id;
-        const { status, page = 1, limit = 20 } = req.query;
+  try {
+    const userId = req.user.id;
+    const { status, page = 1, limit = 20 } = req.query;
 
-        const query = { userId };
-        if (status && status !== 'all') {
-            query.status = status;
-        }
+    const query = { userId };
+    if (status) query.status = status;
 
-        const options = {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            sort: { receivedAt: -1 }
-        };
+    const messages = await Message.find(query)
+      .sort({ receivedDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
 
-        const messages = await Message.paginate(query, options);
+    const total = await Message.countDocuments(query);
 
-        res.status(200).json({
-            success: true,
-            data: messages
-        });
-
-    } catch (error) {
-        next(errorHandler(500, `فشل في جلب الرسائل: ${error.message}`));
-    }
+    res.status(200).json({
+      success: true,
+      data: messages,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في جلب الرسائل: ${error.message}`));
+  }
 };
 
-export const createTemplate = async (req, res, next) => {
-    try {
-        const userId = req.user.id;
-        const { name, content, category } = req.body;
+export const processMessages = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const adId = req.params.adId || null;
 
-        const template = new Template({
-            name,
-            content,
-            category,
-            userId
-        });
 
-        const savedTemplate = await template.save();
+    // معالجة الرسائل مع التحقق من ملكية الإعلان
+    const result = await botService.processNewMessages(adId, userId);
 
-        res.status(201).json({
-            success: true,
-            message: 'تم إنشاء القالب بنجاح',
-            data: savedTemplate
-        });
-
-    } catch (error) {
-        next(errorHandler(500, `فشل في إنشاء القالب: ${error.message}`));
+    // حفظ النتائج في قاعدة البيانات
+    for (const detail of result.details) {
+      if (detail.success) {
+        await Message.findOneAndUpdate(
+          { messageId: detail.messageId, userId },
+          {
+            senderName: detail.senderName,
+            adId: detail.adId || result.adId, // استخدام adId من النتيجة
+            status: "replied",
+            replyContent: detail.replyText,
+            repliedAt: new Date(),
+            replyMethod: "whatsapp",
+          },
+          { upsert: true, new: true }
+        );
+      }
     }
+
+    res.status(200).json({
+      success: true,
+      message: `تم معالجة ${result.processed} رسالة للإعلان ${result.adId}`,
+      data: result,
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في معالجة الرسائل: ${error.message}`));
+  }
+};
+
+// معالجة جميع الإعلانات
+export const processAllMessages = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // استخدام الدالة الجديدة من botService
+    const result = await botService.processAllAdsMessages();
+
+    res.status(200).json({
+      success: true,
+      message: `تم معالجة ${result.length} إعلان`,
+      data: result,
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في معالجة جميع الإعلانات: ${error.message}`));
+  }
+};
+
+// أضف هذا الدالة الجديدة
+export const getUserAds = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const ads = await botService.getMyAds();
+    res.status(200).json({ success: true, data: ads });
+  } catch (error) {
+    next(errorHandler(500, `فشل في جلب الإعلانات: ${error.message}`));
+  }
 };
 
 export const getTemplates = async (req, res, next) => {
-    try {
-        const userId = req.user.id;
-        const { category } = req.query;
+  try {
+    const userId = req.user.id;
+    const templates = await Template.find({ userId, isActive: true });
 
-        const query = { userId, isActive: true };
-        if (category) {
-            query.category = category;
-        }
-
-        const templates = await Template.find(query).sort({ useCount: -1 });
-
-        res.status(200).json({
-            success: true,
-            data: templates
-        });
-
-    } catch (error) {
-        next(errorHandler(500, `فشل في جلب القوالب: ${error.message}`));
-    }
+    res.status(200).json({
+      success: true,
+      data: templates,
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في جلب القوالب: ${error.message}`));
+  }
 };
 
-export const autoReplySettings = async (req, res, next) => {
-    try {
-        const userId = req.user.id;
-        const { enabled, responseTime, templates } = req.body;
+export const createTemplate = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { name, content, category } = req.body;
 
-        // هنا يمكنك حفظ إعدادات الرد التلقائي
-        // await User.findByIdAndUpdate(userId, { autoReplySettings: { enabled, responseTime, templates } });
+    const template = await Template.create({
+      name,
+      content,
+      category,
+      userId,
+    });
 
-        res.status(200).json({
-            success: true,
-            message: 'تم حفظ الإعدادات بنجاح',
-            data: { enabled, responseTime, templates }
-        });
-
-    } catch (error) {
-        next(errorHandler(500, `فشل في حفظ الإعدادات: ${error.message}`));
-    }
+    res.status(201).json({
+      success: true,
+      message: "تم إنشاء القالب بنجاح",
+      data: template,
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في إنشاء القالب: ${error.message}`));
+  }
 };

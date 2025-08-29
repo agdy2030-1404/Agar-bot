@@ -1,72 +1,68 @@
-// modules/messages/msg.model.js
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
-    messageId: {
-        type: String,
-        required: true,
-        unique: true
-    },
-    senderName: {
-        type: String,
-        required: true
-    },
-    senderNumber: {
-        type: String,
-        default: ''
-    },
-    messageContent: {
-        type: String,
-        default: ''
-    },
-    adId: {
-        type: String,
-        required: true
-    },
-    adTitle: {
-        type: String,
-        default: ''
-    },
-    receivedAt: {
-        type: Date,
-        default: Date.now
-    },
-    status: {
-        type: String,
-        enum: ['new', 'read', 'replied', 'archived'],
-        default: 'new'
-    },
-    replySent: {
-        type: Boolean,
-        default: false
-    },
-    replyContent: {
-        type: String,
-        default: ''
-    },
-    repliedAt: {
-        type: Date,
-        default: null
-    },
-    replyMethod: {
-        type: String,
-        enum: ['whatsapp', 'sms', 'internal', 'none'],
-        default: 'none'
-    },
-    userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    }
+  messageId: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  senderName: {
+    type: String,
+    required: true
+  },
+  senderPhone: {
+    type: String,
+    default: ''
+  },
+  adId: {
+    type: String,
+    required: true
+  },
+  adTitle: {
+    type: String,
+    required: true
+  },
+  messageContent: {
+    type: String,
+    default: ''
+  },
+  receivedDate: {
+    type: Date,
+    default: Date.now
+  },
+  status: {
+    type: String,
+    enum: ['new', 'replied', 'read', 'archived'],
+    default: 'new'
+  },
+  replyContent: {
+    type: String,
+    default: ''
+  },
+  repliedAt: {
+    type: Date
+  },
+  replyMethod: {
+    type: String,
+    enum: ['whatsapp', 'sms', 'internal', ''],
+    default: ''
+  },
+  isWhatsappAvailable: {
+    type: Boolean,
+    default: false
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  }
 }, {
-    timestamps: true
+  timestamps: true
 });
 
-// فهرس للبحث السريع
+// فهارس للبحث السريع
 messageSchema.index({ messageId: 1, userId: 1 });
-messageSchema.index({ userId: 1, status: 1 });
-messageSchema.index({ receivedAt: -1 });
+messageSchema.index({ status: 1, receivedDate: 1 });
+messageSchema.index({ adId: 1, userId: 1 });
 
-const Message = mongoose.model('Message', messageSchema);
-
-export default Message;
+export default mongoose.model('Message', messageSchema);

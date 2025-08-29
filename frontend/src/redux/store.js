@@ -1,6 +1,7 @@
 import { configureStore, combineReducers } from "@reduxjs/toolkit";
 import userReducer from "./user/userSlice";
 import botReducer from "./bot/botSlice";
+import adsReducer from "./ads/adsSlice";
 import messageReducer from "./messages/messageSlice";
 import { persistReducer, persistStore } from "redux-persist";
 
@@ -21,6 +22,7 @@ if (typeof window !== "undefined") {
 const rootReducer = combineReducers({
   user: userReducer,
   bot: botReducer,
+  ads: adsReducer,
   messages: messageReducer,
 });
 
@@ -38,7 +40,7 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE'],
+        ignoredActions: ["persist/PERSIST", "persist/REHYDRATE"],
       },
     }),
 });
