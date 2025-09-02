@@ -1,86 +1,130 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import messageService from '../../services/message.service';
+import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
+import messageService from "../../services/message.service";
 
 // جلب الرسائل
 export const fetchMessages = createAsyncThunk(
-  'messages/fetch',
+  "messages/fetch",
   async ({ status, page, limit }, { rejectWithValue }) => {
     try {
       const response = await messageService.getMessages(status, page, limit);
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في جلب الرسائل');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في جلب الرسائل"
+      );
     }
   }
 );
 
 // تشغيل المعالجة التلقائية
 export const processMessages = createAsyncThunk(
-  'messages/process',
+  "messages/process",
   async (adId = null, { rejectWithValue }) => {
     try {
       const response = await messageService.processMessages(adId);
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في معالجة الرسائل');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في معالجة الرسائل"
+      );
     }
   }
 );
 
 // معالجة جميع الإعلانات
 export const processAllMessages = createAsyncThunk(
-  'messages/processAll',
+  "messages/processAll",
   async (_, { rejectWithValue }) => {
     try {
       const response = await messageService.processAllMessages();
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في معالجة جميع الإعلانات');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في معالجة جميع الإعلانات"
+      );
     }
   }
 );
 
 // جلب القوالب
 export const fetchTemplates = createAsyncThunk(
-  'messages/fetchTemplates',
+  "messages/fetchTemplates",
   async (_, { rejectWithValue }) => {
     try {
       const response = await messageService.getTemplates();
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في جلب القوالب');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في جلب القوالب"
+      );
     }
   }
 );
 
 // إنشاء قالب جديد
 export const createTemplate = createAsyncThunk(
-  'messages/createTemplate',
+  "messages/createTemplate",
   async (templateData, { rejectWithValue }) => {
     try {
       const response = await messageService.createTemplate(templateData);
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في إنشاء القالب');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في إنشاء القالب"
+      );
     }
   }
 );
 
 // جلب إعلانات المستخدم
 export const fetchUserAds = createAsyncThunk(
-  'messages/fetchUserAds',
+  "messages/fetchUserAds",
   async (_, { rejectWithValue }) => {
     try {
       const response = await messageService.getUserAds();
       return response;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.message || 'فشل في جلب الإعلانات');
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في جلب الإعلانات"
+      );
+    }
+  }
+);
+
+export const updateTemplate = createAsyncThunk(
+  "messages/updateTemplate",
+  async ({ templateId, templateData }, { rejectWithValue }) => {
+    try {
+      const response = await messageService.updateTemplate(
+        templateId,
+        templateData
+      );
+      return response;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في تحديث قالب الحراج"
+      );
+    }
+  }
+);
+
+// حذف قالب الحراج
+export const deleteTemplate = createAsyncThunk(
+  "messages/deleteTemplate",
+  async (templateId, { rejectWithValue }) => {
+    try {
+      const response = await messageService.deleteTemplate(templateId);
+      return response;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في حذف قالب الحراج"
+      );
     }
   }
 );
 
 const messageSlice = createSlice({
-  name: 'messages',
+  name: "messages",
   initialState: {
     messages: [],
     templates: [],
@@ -90,12 +134,12 @@ const messageSlice = createSlice({
     processingAll: false, // جديد
     error: null,
     lastFetch: null,
-    lastProcess: null
+    lastProcess: null,
   },
   reducers: {
     clearError: (state) => {
       state.error = null;
-    }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -149,8 +193,24 @@ const messageSlice = createSlice({
       // user ads
       .addCase(fetchUserAds.fulfilled, (state, action) => {
         state.userAds = action.payload.data || [];
+      })
+
+      .addCase(updateTemplate.fulfilled, (state, action) => {
+        const updatedTemplate = action.payload.data;
+        const index = state.templates.findIndex(
+          (t) => t._id === updatedTemplate._id
+        );
+        if (index !== -1) {
+          state.templates[index] = updatedTemplate;
+        }
+      })
+
+      // حذف القالب
+      .addCase(deleteTemplate.fulfilled, (state, action) => {
+        const templateId = action.payload.data.id;
+        state.templates = state.templates.filter((t) => t._id !== templateId);
       });
-  }
+  },
 });
 
 export const { clearError } = messageSlice.actions;

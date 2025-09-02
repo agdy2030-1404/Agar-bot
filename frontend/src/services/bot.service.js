@@ -31,6 +31,16 @@ export const botService = {
   getAdDetails: (adId) => api.get(`/api/ads/${adId}`),
   updateAd: (adId) => api.post(`/api/ads/${adId}/update`),
   scheduleUpdates: (data) => api.post("/api/ads/schedule-updates", data),
+  startAutoUpdate: () => api.post("/api/bot/auto-update/start"),
+
+  // إيقاف التحديث التلقائي
+  stopAutoUpdate: () => api.post("/api/bot/auto-update/stop"),
+
+  // الحصول على حالة النظام
+  getSchedulerStatus: () => api.get("/api/bot/auto-update/status"),
+
+  // تحديث جميع الإعلانات يدوياً
+  updateAllAds: () => api.post("/api/bot/ads/update-all"),
 };
 
 export default botService;

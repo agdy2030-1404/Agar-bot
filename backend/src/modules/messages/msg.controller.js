@@ -38,7 +38,6 @@ export const processMessages = async (req, res, next) => {
     const userId = req.user.id;
     const adId = req.params.adId || null;
 
-
     // معالجة الرسائل مع التحقق من ملكية الإعلان
     const result = await botService.processNewMessages(adId, userId);
 
@@ -91,8 +90,8 @@ export const processAllMessages = async (req, res, next) => {
 // أضف هذا الدالة الجديدة
 export const getUserAds = async (req, res, next) => {
   try {
-    const userId = req.user.id;
     const ads = await botService.getMyAds();
+
     res.status(200).json({ success: true, data: ads });
   } catch (error) {
     next(errorHandler(500, `فشل في جلب الإعلانات: ${error.message}`));
@@ -132,5 +131,58 @@ export const createTemplate = async (req, res, next) => {
     });
   } catch (error) {
     next(errorHandler(500, `فشل في إنشاء القالب: ${error.message}`));
+  }
+};
+
+export const updateTemplate = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const templateId = req.params.id;
+    const { name, content, category, isActive } = req.body;
+
+    const template = await Template.findOne({ _id: templateId, userId });
+
+    if (!template) {
+      return next(errorHandler(404, "القالب غير موجود"));
+    }
+
+    // تحديث الحقول المطلوبة فقط
+    if (name !== undefined) template.name = name;
+    if (content !== undefined) template.content = content;
+    if (category !== undefined) template.category = category;
+    if (isActive !== undefined) template.isActive = isActive;
+
+    await template.save();
+
+    res.status(200).json({
+      success: true,
+      message: "تم تحديث القالب بنجاح",
+      data: template,
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في تحديث القالب: ${error.message}`));
+  }
+};
+
+export const deleteTemplate = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const templateId = req.params.id;
+
+    const template = await Template.findOne({ _id: templateId, userId });
+
+    if (!template) {
+      return next(errorHandler(404, "القالب غير موجود"));
+    }
+
+    await Template.findByIdAndDelete(templateId);
+
+    res.status(200).json({
+      success: true,
+      message: "تم حذف القالب بنجاح",
+      data: { id: templateId },
+    });
+  } catch (error) {
+    next(errorHandler(500, `فشل في حذف القالب: ${error.message}`));
   }
 };

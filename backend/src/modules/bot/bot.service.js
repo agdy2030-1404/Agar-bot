@@ -641,7 +641,7 @@ class BotService {
       });
 
       // انتظار تحميل الصفحة
-      await this.page.waitForSelector("._controls__7BE3y", {
+      await this.page.waitForSelector("._controls__7BE3y, button", {
         timeout: 15000,
       });
 
@@ -657,61 +657,43 @@ class BotService {
     try {
       console.log("Looking for update button...");
 
-      // طرق مختلفة للعثور على زر التحديث
-      const buttonSelectors = [
-        // الطريقة 1: البحث بالنص
-        'button:has-text("تحديث")',
-        'button:has-text("تجديد")',
-        '[role="button"]:has-text("تحديث")',
-
-        // الطريقة 2: البحث بالأيقونة
-        'button:has(img[alt*="تحديث"])',
-        'button:has(img[alt*="refresh"])',
-        '[class*="update"] button',
-        '[class*="refresh"] button',
-
-        // الطريقة 3: البحث بالـ class
-        "button._updateBtn__",
-        "button.update-button",
-        '[class*="update"]',
-        '[class*="refresh"]',
-      ];
-
+      // البحث عن زر التحديث باستخدام طرق متعددة
       let updateButton = null;
 
-      for (const selector of buttonSelectors) {
-        try {
-          if (selector.includes("has-text")) {
-            // استخدام XPath للنص
-            const xpath = `//button[contains(text(), "تحديث") or contains(text(), "تجديد")]`;
-            const buttons = await this.page.$x(xpath);
-            if (buttons.length > 0) {
-              updateButton = buttons[0];
-              break;
-            }
-          } else {
-            updateButton = await this.page.waitForSelector(selector, {
-              timeout: 2000,
-            });
-            if (updateButton) break;
-          }
-        } catch (e) {
-          // continue trying next selector
-        }
-      }
-
-      if (!updateButton) {
-        // محاولة أخيرة: البحث في كل الصفحة
-        const allButtons = await this.page.$$("button");
-        for (const button of allButtons) {
-          const text = await this.page.evaluate(
-            (btn) => btn.textContent,
-            button
-          );
+      // الطريقة 1: البحث بالنص
+      try {
+        const buttons = await this.page.$$("button");
+        for (const button of buttons) {
+          const text = await this.page.evaluate((el) => el.textContent, button);
           if (text && (text.includes("تحديث") || text.includes("تجديد"))) {
             updateButton = button;
             break;
           }
+        }
+      } catch (e) {
+        console.log("Text-based search failed, trying other methods");
+      }
+
+      // الطريقة 2: البحث بالكلاس
+      if (!updateButton) {
+        try {
+          const selectors = [
+            'button[class*="update"]',
+            'button[class*="refresh"]',
+            "._updateBtn__",
+            "button._control__",
+          ];
+
+          for (const selector of selectors) {
+            try {
+              updateButton = await this.page.$(selector);
+              if (updateButton) break;
+            } catch (e) {
+              // تجاهل الخطأ والمحاولة بالselector التالي
+            }
+          }
+        } catch (e) {
+          console.log("Class-based search failed");
         }
       }
 
@@ -723,7 +705,6 @@ class BotService {
       return updateButton;
     } catch (error) {
       console.error("Error finding update button:", error);
-
       throw error;
     }
   }
@@ -736,21 +717,19 @@ class BotService {
           button.disabled ||
           button.getAttribute("disabled") !== null ||
           button.classList.contains("disabled") ||
-          button.style.opacity === "0.5"
+          window.getComputedStyle(button).opacity === "0.5" ||
+          window.getComputedStyle(button).cursor === "not-allowed"
         );
       }, updateButton);
 
       if (isDisabled) {
-        throw new Error("زر التحديث غير متاح حالياً");
-      }
+        // محاولة معرفة سبب التعطيل
+        const reason = await this.page.evaluate((button) => {
+          const parent = button.closest("div");
+          return parent ? parent.textContent : "";
+        }, updateButton);
 
-      // التحقق من النص إذا كان يشير إلى عدم التمكن من التحديث
-      const buttonText = await this.page.evaluate((button) => {
-        return button.textContent;
-      }, updateButton);
-
-      if (buttonText.includes("غير متاح") || buttonText.includes("معلق")) {
-        throw new Error("التحديث غير متاح حسب نص الزر");
+        throw new Error(`زر التحديث غير متاح حالياً: ${reason}`);
       }
 
       return true;
@@ -762,33 +741,50 @@ class BotService {
 
   async clickUpdateButton(updateButton) {
     try {
+      // أخذ screenshot قبل النقر للتحقق
+      await this.page.screenshot({ path: "before_update.png" });
+
       // النقر على زر التحديث
       await updateButton.click();
       console.log("Clicked update button");
 
-      // الانتظار لظهور نافذة التأكيد إذا كانت موجودة
+      // الانتظار لظهور نافذة التأكيد
       try {
-        await this.page.waitForSelector('.modal, .dialog, [role="dialog"]', {
-          timeout: 5000,
-        });
-
-        // البحث عن زر التأكيد والنقر عليه
-        const confirmButton = await this.page.waitForSelector(
-          'button:has-text("تأكيد"), button:has-text("نعم"), button:has-text("موافق")',
-          { timeout: 5000 }
+        await this.page.waitForSelector(
+          '.modal, .dialog, [role="dialog"], .popup, .overlay',
+          {
+            timeout: 5000,
+          }
         );
 
-        if (confirmButton) {
-          await confirmButton.click();
-          console.log("Clicked confirm button");
+        // البحث عن زر التأكيد والنقر عليه
+        const confirmButtons = await this.page.$$("button");
+        for (const button of confirmButtons) {
+          const text = await this.page.evaluate((el) => el.textContent, button);
+          if (
+            text &&
+            (text.includes("تأكيد") ||
+              text.includes("نعم") ||
+              text.includes("موافق") ||
+              text.includes("تم") ||
+              text.includes("Update") ||
+              text.includes("Confirm"))
+          ) {
+            await button.click();
+            console.log("Clicked confirm button");
+            await this.wait(2000);
+            break;
+          }
         }
       } catch (modalError) {
-        // إذا لم تظهر نافذة تأكيد، نستمر
         console.log("No confirmation modal appeared");
       }
 
       // انتظار اكتمال التحديث
-      await this.wait(3000);
+      await this.wait(5000);
+
+      // أخذ screenshot بعد النقر للتحقق
+      await this.page.screenshot({ path: "after_update.png" });
 
       return true;
     } catch (error) {
@@ -799,39 +795,90 @@ class BotService {
 
   async verifyUpdateSuccess() {
     try {
-      // محاولة الانتظار حتى تظهر رسالة النجاح أو toast
-      const maxRetries = 5;
-      let successMessage = null;
+      // الانتظار لظهور أي رسالة نجاح أو خطأ
+      await this.wait(3000);
 
-      for (let i = 0; i < maxRetries; i++) {
-        successMessage = await this.page.evaluate(() => {
-          const elements = document.querySelectorAll("*");
-          for (let el of elements) {
-            if (el.textContent.includes("تم تحديث الإعلان بنجاح")) {
-              return el.textContent.trim();
-            }
+      // البحث عن رسائل النجاح
+      const success = await this.page.evaluate(() => {
+        // البحث في كل العناصر عن رسالة نجاح
+        const elements = document.querySelectorAll("*");
+        for (let el of elements) {
+          const text = el.textContent || "";
+          if (
+            text.includes("تم التحديث") ||
+            text.includes("تم بنجاح") ||
+            text.includes("تمت العملية") ||
+            text.includes("تم تحديث الإعلان") ||
+            text.includes("تمت إعادة النشر") ||
+            text.includes("successful") ||
+            text.includes("تمت بنجاح")
+          ) {
+            return true;
           }
-          return null;
-        });
+        }
+        return false;
+      });
 
-        if (successMessage) break;
-
-        await this.wait(1000); // الانتظار ثانية قبل التحقق مرة أخرى
-      }
-
-      if (successMessage) {
-        console.log(`Update successful: ${successMessage}`);
+      if (success) {
+        console.log("Update successful: Success message found");
         return true;
       }
 
-      // fallback: إذا بقينا في صفحة الإعلان نفسها
+      // البحث عن رسائل الخطأ
+      const errorMsg = await this.page.evaluate(() => {
+        const elements = document.querySelectorAll("*");
+        for (let el of elements) {
+          const text = el.textContent || "";
+          if (
+            text.includes("لا يمكن تحديث الإعلان") ||
+            text.includes("بين ساعة وساعة") ||
+            text.includes("غير متاح") ||
+            text.includes("error") ||
+            text.includes("فشل") ||
+            text.includes("ممنوع") ||
+            text.includes("محظور")
+          ) {
+            return text;
+          }
+        }
+        return null;
+      });
+
+      if (errorMsg) {
+        throw new Error(`Update failed: ${errorMsg}`);
+      }
+
+      // التحقق من أننا ما زلنا في صفحة الإعلان
       const currentUrl = await this.page.url();
       if (currentUrl.includes("/ad/")) {
-        console.log("Update completed successfully (fallback)");
+        console.log("Update completed successfully (still on ad page)");
         return true;
       }
 
-      throw new Error("Unable to verify update success");
+      // التحقق من تغيير حالة الزر
+      const buttonState = await this.page.evaluate(() => {
+        const buttons = document.querySelectorAll("button");
+        for (let button of buttons) {
+          const text = button.textContent || "";
+          if (text.includes("تحديث") || text.includes("تجديد")) {
+            return (
+              window.getComputedStyle(button).opacity === "0.5" ||
+              button.disabled ||
+              button.getAttribute("disabled") !== null
+            );
+          }
+        }
+        return false;
+      });
+
+      if (buttonState) {
+        console.log("Update successful: Button is now disabled");
+        return true;
+      }
+
+      throw new Error(
+        "Unable to verify update success - no clear indicators found"
+      );
     } catch (error) {
       console.error("Error verifying update:", error);
       throw error;
@@ -854,8 +901,25 @@ class BotService {
       // النقر على الزر
       await this.clickUpdateButton(updateButton);
 
-      // التحقق من النجاح
-      const success = await this.verifyUpdateSuccess();
+      // التحقق من النجاح مع محاولات متعددة
+      let success = false;
+      let attempts = 0;
+
+      while (!success && attempts < 3) {
+        try {
+          success = await this.verifyUpdateSuccess();
+          if (!success) {
+            attempts++;
+            await this.wait(2000);
+          }
+        } catch (verifyError) {
+          attempts++;
+          if (attempts >= 3) {
+            throw verifyError;
+          }
+          await this.wait(2000);
+        }
+      }
 
       if (success) {
         console.log(`Ad ${adId} updated successfully`);
@@ -867,10 +931,252 @@ class BotService {
         };
       }
 
-      throw new Error("Update completed but verification failed");
+      throw new Error(
+        "Update completed but verification failed after multiple attempts"
+      );
     } catch (error) {
       console.error(`Failed to update ad ${adId}:`, error);
+
+      // أخذ screenshot للتحقق من الخطأ
+      await this.page.screenshot({ path: `error_${adId}.png` });
+
       throw new Error(`فشل في تحديث الإعلان: ${error.message}`);
+    }
+  }
+
+async updateAllAds() {
+  try {
+    console.log("Starting to update all ads...");
+
+    // جلب جميع الإعلانات
+    const ads = await this.getMyAds();
+
+    if (ads.length === 0) {
+      console.log("No ads found to update");
+      return { success: true, updated: 0, total: 0 };
+    }
+
+    console.log(`Found ${ads.length} ads to process`);
+
+    let successfulUpdates = 0;
+    const results = [];
+
+    for (const ad of ads) {
+      try {
+        if (ad.status !== 'active') {
+          console.log(`Skipping inactive ad: ${ad.adId}`);
+          results.push({
+            adId: ad.adId,
+            status: 'skipped',
+            message: 'الإعلان غير نشط'
+          });
+          continue;
+        }
+
+        console.log(`Processing ad: ${ad.adId} - ${ad.title}`);
+
+        const result = await this.updateAd(ad.adId);
+
+        if (result.success) {
+          successfulUpdates++;
+          results.push({
+            adId: ad.adId,
+            status: 'success',
+            message: result.message
+          });
+        } else {
+          results.push({
+            adId: ad.adId,
+            status: 'failed',
+            message: result.message
+          });
+        }
+
+        // التحقق من القيود الزمنية
+        const waitTime = await this.handleUpdateLimitations();
+        if (waitTime > 0) {
+          console.log(`Update limited, waiting ${waitTime/1000/60} minutes`);
+          await this.wait(waitTime);
+          break; // إيقاف التحديثات الإضافية
+        }
+
+        // انتظار عشوائي بين الإعلانات
+        const randomWait = Math.floor(Math.random() * 90000) + 30000;
+        console.log(`Waiting ${randomWait/1000} seconds before next ad...`);
+        await this.wait(randomWait);
+
+      } catch (error) {
+        console.error(`Error updating ad ${ad.adId}:`, error);
+        results.push({
+          adId: ad.adId,
+          status: 'error',
+          message: error.message
+        });
+        
+        // في حالة الخطأ، انتظار فترة أطول
+        await this.wait(120000);
+      }
+    }
+
+    console.log(`Update process completed. Successful: ${successfulUpdates}/${ads.length}`);
+    return {
+      success: true,
+      updated: successfulUpdates,
+      total: ads.length,
+      results: results
+    };
+  } catch (error) {
+    console.error("Error in updateAllAds:", error);
+    throw error;
+  }
+}
+
+  async scheduleRandomUpdates() {
+    try {
+      // حساب وقت عشوائي بين 20-48 ساعة
+      const randomHours = Math.floor(Math.random() * 29) + 20;
+      const randomMs = randomHours * 60 * 60 * 1000;
+
+      console.log(
+        `Scheduling next update in ${randomHours} hours (${randomMs}ms)`
+      );
+
+      // إلغاء أي جدولة سابقة
+      if (this.updateTimeout) {
+        clearTimeout(this.updateTimeout);
+      }
+
+      // جدولة التحديث التالي
+      this.updateTimeout = setTimeout(async () => {
+        try {
+          console.log("Auto-update triggered by scheduler");
+          await this.updateAllAds();
+
+          // جدولة التحديث التالي بعد الانتهاء
+          await this.scheduleRandomUpdates();
+        } catch (error) {
+          console.error("Error in scheduled update:", error);
+          // إعادة الجدولة في حالة الخطأ (بعد ساعة)
+          setTimeout(() => this.scheduleRandomUpdates(), 60 * 60 * 1000);
+        }
+      }, randomMs);
+
+      return {
+        success: true,
+        nextUpdate: new Date(Date.now() + randomMs),
+        hours: randomHours,
+      };
+    } catch (error) {
+      console.error("Error scheduling updates:", error);
+      throw error;
+    }
+  }
+
+  // بدء نظام التحديث التلقائي
+  async startAutoUpdate() {
+    try {
+      console.log("Starting auto-update system...");
+
+      // التأكد من أن البوت يعمل
+      await this.ensureBotRunning();
+
+      // بدء الجدولة
+      const scheduleResult = await this.scheduleRandomUpdates();
+
+      console.log("Auto-update system started successfully");
+      return scheduleResult;
+    } catch (error) {
+      console.error("Failed to start auto-update system:", error);
+      throw error;
+    }
+  }
+
+  // إيقاف نظام التحديث التلقائي
+  stopAutoUpdate() {
+    if (this.updateTimeout) {
+      clearTimeout(this.updateTimeout);
+      this.updateTimeout = null;
+      console.log("Auto-update system stopped");
+    }
+
+    return { success: true, message: "Auto-update stopped" };
+  }
+
+  // الحصول على حالة النظام
+  getSchedulerStatus() {
+    if (this.updateTimeout) {
+      const nextUpdate = new Date(Date.now() + this.updateTimeout._idleTimeout);
+      return {
+        isRunning: true,
+        nextUpdate: nextUpdate,
+        timeoutMs: this.updateTimeout._idleTimeout,
+      };
+    }
+
+    return { isRunning: false };
+  }
+
+  async ensureBotRunning() {
+    try {
+      console.log("Ensuring bot is running...");
+
+      // إذا كان المتصفح غير موجود أو مغلق
+      if (!this.browser) {
+        console.log("Browser not found, initializing...");
+        await this.initBrowser();
+        return true;
+      }
+
+      // إذا كانت الصفحة غير موجودة أو مغلقة
+      if (!this.page || this.page.isClosed()) {
+        console.log("Page not found or closed, creating new page...");
+        this.page = await this.browser.newPage();
+
+        // إعادة تطبيق الإعدادات
+        await this.page.setUserAgent(
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        );
+        await this.page.setExtraHTTPHeaders({
+          "Accept-Language": "ar,en;q=0.9",
+        });
+
+        // تحميل الكوكيز إذا كانت موجودة
+        await this.loadCookies();
+      }
+
+      // التحقق من تسجيل الدخول
+      const isLoggedIn = await this.checkLoginStatus();
+
+      if (!isLoggedIn) {
+        console.log("Not logged in, attempting login...");
+        await this.loginToAqar();
+      }
+
+      console.log("✅ Bot is running and ready");
+      return true;
+    } catch (error) {
+      console.error("Error ensuring bot is running:", error);
+
+      // محاولة إعادة التشغيل الكامل
+      try {
+        await this.stop();
+        await this.initBrowser();
+        return await this.checkLoginStatus();
+      } catch (restartError) {
+        console.error("Complete restart failed:", restartError);
+        throw new Error(
+          "Failed to ensure bot is running: " + restartError.message
+        );
+      }
+    }
+  }
+
+  async stop() {
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
+      this.page = null;
+      this.isLoggedIn = false;
     }
   }
 

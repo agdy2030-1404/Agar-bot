@@ -75,6 +75,62 @@ export const getAds = createAsyncThunk(
   }
 );
 
+export const startAutoUpdate = createAsyncThunk(
+  "bot/startAutoUpdate",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await botService.startAutoUpdate();
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في بدء التحديث التلقائي"
+      );
+    }
+  }
+);
+
+export const stopAutoUpdate = createAsyncThunk(
+  "bot/stopAutoUpdate",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await botService.stopAutoUpdate();
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في إيقاف التحديث التلقائي"
+      );
+    }
+  }
+);
+
+export const getSchedulerStatus = createAsyncThunk(
+  "bot/getSchedulerStatus",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await botService.getSchedulerStatus();
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في جلب حالة المجدول"
+      );
+    }
+  }
+);
+
+export const updateAllAds = createAsyncThunk(
+  "bot/updateAllAds",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await botService.updateAllAds();
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data?.message || "فشل في تحديث جميع الإعلانات"
+      );
+    }
+  }
+);
+
 const botSlice = createSlice({
   name: "bot",
   initialState: {
@@ -84,6 +140,12 @@ const botSlice = createSlice({
     loading: false,
     error: null,
     lastUpdate: null,
+
+    // حالة التحديث التلقائي
+    autoUpdate: {
+      isRunning: false,
+      nextUpdate: null,
+    },
 
     // الإعلانات
     ads: [],
@@ -181,6 +243,54 @@ const botSlice = createSlice({
       .addCase(getAds.rejected, (state, action) => {
         state.adsLoading = false;
         state.adsError = action.payload || "فشل في جلب الإعلانات";
+      })
+      .addCase(startAutoUpdate.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(startAutoUpdate.fulfilled, (state, action) => {
+        state.loading = false;
+        state.autoUpdate = {
+          isRunning: true,
+          nextUpdate: action.payload.nextUpdate,
+        };
+      })
+      .addCase(startAutoUpdate.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // stopAutoUpdate
+      .addCase(stopAutoUpdate.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(stopAutoUpdate.fulfilled, (state) => {
+        state.loading = false;
+        state.autoUpdate = {
+          isRunning: false,
+          nextUpdate: null,
+        };
+      })
+      .addCase(stopAutoUpdate.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // getSchedulerStatus
+      .addCase(getSchedulerStatus.fulfilled, (state, action) => {
+        state.autoUpdate = action.payload;
+      })
+
+      // updateAllAds
+      .addCase(updateAllAds.pending, (state) => {
+        state.adsLoading = true;
+      })
+      .addCase(updateAllAds.fulfilled, (state, action) => {
+        state.adsLoading = false;
+        // يمكنك تحديث حالة الإعلانات هنا إذا لزم الأمر
+      })
+      .addCase(updateAllAds.rejected, (state, action) => {
+        state.adsLoading = false;
+        state.adsError = action.payload;
       });
   },
 });

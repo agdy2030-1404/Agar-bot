@@ -20,4 +20,9 @@ router.get("/login-status", verifyToken, async (req, res, next) => {
     next(errorHandler(500, `Failed to check login status: ${error.message}`));
   }
 });
+
+router.post("/auto-update/start", verifyToken, botController.startAutoUpdate);
+router.post("/auto-update/stop", verifyToken, botController.stopAutoUpdate);
+router.get("/auto-update/status", verifyToken, botController.getSchedulerStatus);
+router.post("/ads/update-all", verifyToken, botController.updateAllAds);
 export default router;

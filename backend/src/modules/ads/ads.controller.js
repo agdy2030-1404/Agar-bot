@@ -1,53 +1,22 @@
 import Ad from "./ads.model.js";
 import { errorHandler } from "../../utils/error.js";
 import botService from "../bot/bot.service.js";
+import scheduler from "../../utils/scheduler.js";
 
 export const fetchUserAds = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    // جلب الإعلانات من الموقع
+    // جلب الإعلانات من الموقع فقط
     const ads = await botService.getMyAds();
-
-    // حفظ الإعلانات في قاعدة البيانات
-    const savedAds = [];
-    for (const adData of ads) {
-      try {
-        // التحقق إذا كان الإعلان موجوداً بالفعل
-        let ad = await Ad.findOne({ adId: adData.adId, userId });
-
-        if (ad) {
-          // تحديث الإعلان الموجود
-          ad = await Ad.findOneAndUpdate(
-            { adId: adData.adId, userId },
-            { ...adData, lastUpdated: new Date() },
-            { new: true }
-          );
-        } else {
-          // إنشاء إعلان جديد
-          ad = await Ad.create({
-            ...adData,
-            userId,
-            views: 0,
-          });
-        }
-
-        savedAds.push(ad);
-      } catch (dbError) {
-        console.error(`Error saving ad ${adData.adId}:`, dbError);
-      }
-    }
 
     res.status(200).json({
       success: true,
-      message: `تم جلب ${savedAds.length} إعلان بنجاح`,
-      data: savedAds,
+      message: `تم جلب ${ads.length} إعلان بنجاح`,
+      data: ads, // إرجاع الإعلانات مباشرة من الموقع
     });
   } catch (error) {
     next(errorHandler(500, `فشل في جلب الإعلانات: ${error.message}`));
   }
 };
-
 export const getUserAds = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -148,4 +117,3 @@ export const scheduleAdUpdate = async (req, res, next) => {
     next(errorHandler(500, `فشل في جدولة التحديث: ${error.message}`));
   }
 };
-

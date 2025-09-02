@@ -78,3 +78,58 @@ export const fetchUserAds = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+export const startAutoUpdate = async (req, res, next) => {
+  try {
+    const result = await botService.startAutoUpdate();
+    
+    res.status(200).json({
+      success: true,
+      message: "Auto-update system started",
+      data: result
+    });
+  } catch (error) {
+    next(errorHandler(500, `Failed to start auto-update: ${error.message}`));
+  }
+};
+
+export const stopAutoUpdate = async (req, res, next) => {
+  try {
+    const result = botService.stopAutoUpdate();
+    
+    res.status(200).json({
+      success: true,
+      message: "Auto-update system stopped",
+      data: result
+    });
+  } catch (error) {
+    next(errorHandler(500, `Failed to stop auto-update: ${error.message}`));
+  }
+};
+
+export const getSchedulerStatus = async (req, res, next) => {
+  try {
+    const status = botService.getSchedulerStatus();
+    
+    res.status(200).json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    next(errorHandler(500, `Failed to get scheduler status: ${error.message}`));
+  }
+};
+
+export const updateAllAds = async (req, res, next) => {
+  try {
+    const result = await botService.updateAllAds();
+    
+    res.status(200).json({
+      success: true,
+      message: `Updated ${result.updated}/${result.total} ads`,
+      data: result
+    });
+  } catch (error) {
+    next(errorHandler(500, `Failed to update all ads: ${error.message}`));
+  }
+};
