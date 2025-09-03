@@ -15,7 +15,7 @@ export default function Messages() {
   const { messages, loading, processing, error, userAds } = useSelector(
     (state) => state.messages
   );
-  const [selectedAdId, setSelectedAdId] = useState("");
+  const [selectedAdId, setSelectedAdId] = useState("all");
 
   useEffect(() => {
     dispatch(fetchMessages({ status: "", page: 1, limit: 20 }));

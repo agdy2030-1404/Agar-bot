@@ -7,7 +7,6 @@ export const connectDb = () =>
     .connect(config.mongoUrl)
     .then(() => {
       console.log("MongoDb is connected");
-      scheduler.start();
     })
     .catch((err) => {
       console.log(err);

@@ -42,22 +42,6 @@ const processAllMessages = async () => {
   return res.data;
 };
 
-// جلب القوالب
-const getTemplates = async () => {
-  const res = await axios.get(`${API_URL}/api/messages/templates`, {
-    withCredentials: true,
-  });
-  return res.data;
-};
-
-// إنشاء قالب جديد
-const createTemplate = async (template) => {
-  const res = await axios.post(`${API_URL}/api/messages/templates`, template, {
-    withCredentials: true,
-  });
-  return res.data;
-};
-
 // جلب إعلانات المستخدم
 
 const getUserAds = async () => {
@@ -80,31 +64,9 @@ const getUserAds = async () => {
   }
 };
 
-const updateTemplate = async (templateId, templateData) => {
-  const res = await axios.put(
-    `${API_URL}/api/messages/templates/${templateId}`,
-    templateData,
-    { withCredentials: true }
-  );
-  return res.data;
-};
-
-// حذف قالب الحراج
-const deleteTemplate = async (templateId) => {
-  const res = await axios.delete(
-    `${API_URL}/api/messages/templates/${templateId}`,
-    { withCredentials: true }
-  );
-  return res.data;
-};
-
 export default {
   getMessages,
   processMessages,
   processAllMessages, // جديد
-  getTemplates,
-  createTemplate,
   getUserAds,
-  updateTemplate,
-  deleteTemplate, // جديد
 };

@@ -46,36 +46,6 @@ export const processAllMessages = createAsyncThunk(
   }
 );
 
-// جلب القوالب
-export const fetchTemplates = createAsyncThunk(
-  "messages/fetchTemplates",
-  async (_, { rejectWithValue }) => {
-    try {
-      const response = await messageService.getTemplates();
-      return response;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || "فشل في جلب القوالب"
-      );
-    }
-  }
-);
-
-// إنشاء قالب جديد
-export const createTemplate = createAsyncThunk(
-  "messages/createTemplate",
-  async (templateData, { rejectWithValue }) => {
-    try {
-      const response = await messageService.createTemplate(templateData);
-      return response;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || "فشل في إنشاء القالب"
-      );
-    }
-  }
-);
-
 // جلب إعلانات المستخدم
 export const fetchUserAds = createAsyncThunk(
   "messages/fetchUserAds",
@@ -91,43 +61,10 @@ export const fetchUserAds = createAsyncThunk(
   }
 );
 
-export const updateTemplate = createAsyncThunk(
-  "messages/updateTemplate",
-  async ({ templateId, templateData }, { rejectWithValue }) => {
-    try {
-      const response = await messageService.updateTemplate(
-        templateId,
-        templateData
-      );
-      return response;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || "فشل في تحديث قالب الحراج"
-      );
-    }
-  }
-);
-
-// حذف قالب الحراج
-export const deleteTemplate = createAsyncThunk(
-  "messages/deleteTemplate",
-  async (templateId, { rejectWithValue }) => {
-    try {
-      const response = await messageService.deleteTemplate(templateId);
-      return response;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || "فشل في حذف قالب الحراج"
-      );
-    }
-  }
-);
-
 const messageSlice = createSlice({
   name: "messages",
   initialState: {
     messages: [],
-    templates: [],
     userAds: [], // جديد
     loading: false,
     processing: false,
@@ -182,33 +119,9 @@ const messageSlice = createSlice({
         state.error = action.payload;
       })
 
-      // templates
-      .addCase(fetchTemplates.fulfilled, (state, action) => {
-        state.templates = action.payload.data || [];
-      })
-      .addCase(createTemplate.fulfilled, (state, action) => {
-        state.templates.push(action.payload.data);
-      })
-
       // user ads
       .addCase(fetchUserAds.fulfilled, (state, action) => {
         state.userAds = action.payload.data || [];
-      })
-
-      .addCase(updateTemplate.fulfilled, (state, action) => {
-        const updatedTemplate = action.payload.data;
-        const index = state.templates.findIndex(
-          (t) => t._id === updatedTemplate._id
-        );
-        if (index !== -1) {
-          state.templates[index] = updatedTemplate;
-        }
-      })
-
-      // حذف القالب
-      .addCase(deleteTemplate.fulfilled, (state, action) => {
-        const templateId = action.payload.data.id;
-        state.templates = state.templates.filter((t) => t._id !== templateId);
       });
   },
 });

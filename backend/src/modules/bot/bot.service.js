@@ -944,92 +944,95 @@ class BotService {
     }
   }
 
-async updateAllAds() {
-  try {
-    console.log("Starting to update all ads...");
+  async updateAllAds() {
+    try {
+      console.log("Starting to update all ads...");
 
-    // جلب جميع الإعلانات
-    const ads = await this.getMyAds();
+      // جلب جميع الإعلانات
+      const ads = await this.getMyAds();
 
-    if (ads.length === 0) {
-      console.log("No ads found to update");
-      return { success: true, updated: 0, total: 0 };
-    }
-
-    console.log(`Found ${ads.length} ads to process`);
-
-    let successfulUpdates = 0;
-    const results = [];
-
-    for (const ad of ads) {
-      try {
-        if (ad.status !== 'active') {
-          console.log(`Skipping inactive ad: ${ad.adId}`);
-          results.push({
-            adId: ad.adId,
-            status: 'skipped',
-            message: 'الإعلان غير نشط'
-          });
-          continue;
-        }
-
-        console.log(`Processing ad: ${ad.adId} - ${ad.title}`);
-
-        const result = await this.updateAd(ad.adId);
-
-        if (result.success) {
-          successfulUpdates++;
-          results.push({
-            adId: ad.adId,
-            status: 'success',
-            message: result.message
-          });
-        } else {
-          results.push({
-            adId: ad.adId,
-            status: 'failed',
-            message: result.message
-          });
-        }
-
-        // التحقق من القيود الزمنية
-        const waitTime = await this.handleUpdateLimitations();
-        if (waitTime > 0) {
-          console.log(`Update limited, waiting ${waitTime/1000/60} minutes`);
-          await this.wait(waitTime);
-          break; // إيقاف التحديثات الإضافية
-        }
-
-        // انتظار عشوائي بين الإعلانات
-        const randomWait = Math.floor(Math.random() * 90000) + 30000;
-        console.log(`Waiting ${randomWait/1000} seconds before next ad...`);
-        await this.wait(randomWait);
-
-      } catch (error) {
-        console.error(`Error updating ad ${ad.adId}:`, error);
-        results.push({
-          adId: ad.adId,
-          status: 'error',
-          message: error.message
-        });
-        
-        // في حالة الخطأ، انتظار فترة أطول
-        await this.wait(120000);
+      if (ads.length === 0) {
+        console.log("No ads found to update");
+        return { success: true, updated: 0, total: 0 };
       }
-    }
 
-    console.log(`Update process completed. Successful: ${successfulUpdates}/${ads.length}`);
-    return {
-      success: true,
-      updated: successfulUpdates,
-      total: ads.length,
-      results: results
-    };
-  } catch (error) {
-    console.error("Error in updateAllAds:", error);
-    throw error;
+      console.log(`Found ${ads.length} ads to process`);
+
+      let successfulUpdates = 0;
+      const results = [];
+
+      for (const ad of ads) {
+        try {
+          if (ad.status !== "active") {
+            console.log(`Skipping inactive ad: ${ad.adId}`);
+            results.push({
+              adId: ad.adId,
+              status: "skipped",
+              message: "الإعلان غير نشط",
+            });
+            continue;
+          }
+
+          console.log(`Processing ad: ${ad.adId} - ${ad.title}`);
+
+          const result = await this.updateAd(ad.adId);
+
+          if (result.success) {
+            successfulUpdates++;
+            results.push({
+              adId: ad.adId,
+              status: "success",
+              message: result.message,
+            });
+          } else {
+            results.push({
+              adId: ad.adId,
+              status: "failed",
+              message: result.message,
+            });
+          }
+
+          // التحقق من القيود الزمنية
+          const waitTime = await this.handleUpdateLimitations();
+          if (waitTime > 0) {
+            console.log(
+              `Update limited, waiting ${waitTime / 1000 / 60} minutes`
+            );
+            await this.wait(waitTime);
+            break; // إيقاف التحديثات الإضافية
+          }
+
+          // انتظار عشوائي بين الإعلانات
+          const randomWait = Math.floor(Math.random() * 90000) + 30000;
+          console.log(`Waiting ${randomWait / 1000} seconds before next ad...`);
+          await this.wait(randomWait);
+        } catch (error) {
+          console.error(`Error updating ad ${ad.adId}:`, error);
+          results.push({
+            adId: ad.adId,
+            status: "error",
+            message: error.message,
+          });
+
+          // في حالة الخطأ، انتظار فترة أطول
+          await this.wait(120000);
+        }
+      }
+
+      console.log(
+        `Update process completed. Successful: ${successfulUpdates}/${ads.length}`
+      );
+      return {
+        success: true,
+        updated: successfulUpdates,
+        total: ads.length,
+        results: results,
+      };
+    } catch (error) {
+      console.error("Error in updateAllAds:", error);
+      throw error;
+    }
   }
-}
 
   async scheduleRandomUpdates() {
     try {
@@ -1321,7 +1324,8 @@ async updateAllAds() {
               receivedDate,
               isNew,
               isWhatsappAvailable,
-              adId, // إضافة adId إلى بيانات الرسالة
+              adId,
+              element: card, // إضافة العنصر نفسه
             });
           } catch (error) {
             console.error("Error extracting message:", error);
@@ -1336,6 +1340,17 @@ async updateAllAds() {
     } catch (error) {
       console.error("Error extracting messages:", error);
       throw error;
+    }
+  }
+
+  async getMessageElement(messageId) {
+    try {
+      // هذا مثال - قد تحتاج إلى تعديله حسب هيكل صفحتك
+      const element = await this.page.$(`[data-message-id="${messageId}"]`);
+      return element;
+    } catch (error) {
+      console.error("Error getting message element:", error);
+      return null;
     }
   }
 
@@ -1559,49 +1574,50 @@ async updateAllAds() {
   }
 
   async selectReplyTemplate(message) {
-    // قوالب الردود الجاهزة
-    const templates = {
-      greeting:
-        "السلام عليكم ورحمة الله وبركاته 🌹\nشكراً لتواصلكم، كيف يمكنني مساعدتك؟",
-      price:
-        "أهلاً وسهلاً بك 🌹\nالسعر المذكور في الإعلان نهائي وقابل للتفاوض حسب الظروف.\nهل ترغب في معرفة المزيد من التفاصيل؟",
-      availability:
-        "أهلاً بك 🌹\nنعم، الإعلان لا يزال متاح.\nهل ترغب في الترتيب لمعاينة أو لديك استفسار محدد؟",
-      location:
-        "وعليكم السلام ورحمة الله 🌹\nالمكان موضح في الخريطة في الإعلان.\nهل تحتاج إلى اتجاهات محددة أو معلومات عن الموقع؟",
-      default:
-        "السلام عليكم 🌹\nشكراً لاهتمامك بالإعلان.\nهل لديك استفسار محدد أو ترغب في معرفة المزيد من التفاصيل؟",
-    };
+    // الرد الموحد فقط
+    return "السلام عليكم ورحمة الله يعطيكم العافية لاهنتوا رقم الوسيط في الإعلان أرجو التواصل معاه ولكم جزيل الشكر والتقدير-إدارة منصة صانع العقود للخدمات العقارية";
+  }
 
-    // تحليل محتوى الرسالة لتحديد الرد المناسب
-    const messageContent = message.messageContent?.toLowerCase() || "";
+  async processSingleMessage(message) {
+    try {
+      console.log(`Processing message: ${message.messageId}`);
 
-    if (
-      messageContent.includes("سعر") ||
-      messageContent.includes("ثمن") ||
-      messageContent.includes("كم")
-    ) {
-      return templates.price;
-    } else if (
-      messageContent.includes("متاح") ||
-      messageContent.includes("موجود") ||
-      messageContent.includes("لازال")
-    ) {
-      return templates.availability;
-    } else if (
-      messageContent.includes("مكان") ||
-      messageContent.includes("موقع") ||
-      messageContent.includes("عنوان")
-    ) {
-      return templates.location;
-    } else if (
-      messageContent.includes("السلام") ||
-      messageContent.includes("مرحب") ||
-      messageContent.includes("اهلا")
-    ) {
-      return templates.greeting;
-    } else {
-      return templates.default;
+      // استخدام الرد الموحد مباشرة
+      const replyText =
+        "السلام عليكم ورحمة الله يعطيكم العافية لاهنتوا رقم الوسيط في الإعلان أرجو التواصل معاه ولكم جزيل الشكر والتقدير-إدارة منصة صانع العقود للخدمات العقارية";
+
+      // هنا تحتاج إلى الحصول على عنصر الرسالة (element) من الكود
+      // قد تحتاج إلى تعديل extractNewMessages لإرجاع العناصر أيضاً
+      const messageElement = await this.getMessageElement(message.messageId);
+
+      if (!messageElement) {
+        throw new Error("لم يتم العثور على عنصر الرسالة");
+      }
+
+      // النقر على زر الواتساب
+      const whatsappPage = await this.clickWhatsappButton(messageElement);
+
+      // إرسال الرسالة
+      await this.sendWhatsappMessage(whatsappPage, replyText);
+
+      // إغلاق صفحة الواتساب
+      await whatsappPage.close();
+      await this.page.bringToFront();
+
+      // تحديث حالة الرسالة (إذا كان لديك هذه الدالة)
+      if (this.markMessageAsReplied) {
+        await this.markMessageAsReplied(message.messageId);
+      }
+
+      return {
+        success: true,
+        messageId: message.messageId,
+        senderName: message.senderName,
+        replyText: replyText,
+      };
+    } catch (error) {
+      console.error(`Error processing message ${message.messageId}:`, error);
+      throw error;
     }
   }
 
@@ -1651,12 +1667,31 @@ async updateAllAds() {
       const results = [];
       for (const message of newMessages) {
         try {
-          const result = await this.processSingleMessage(message);
-          results.push({
-            ...result,
-            adId: targetAdId,
-          });
+          // بداية المعالجة المباشرة هنا
+          console.log(`Processing message: ${message.messageId}`);
 
+          const replyText =
+            "السلام عليكم ورحمة الله يعطيكم العافية لاهنتوا رقم الوسيط في الإعلان أرجو التواصل معاه ولكم جزيل الشكر والتقدير-إدارة منصة صانع العقود للخدمات العقارية";
+
+          // النقر على زر الواتساب (تعديل clickWhatsappButton لتعمل مع البيانات)
+          const whatsappPage = await this.clickWhatsappButton(message);
+
+          // إرسال الرسالة
+          await this.sendWhatsappMessage(whatsappPage, replyText);
+
+          // إغلاق صفحة الواتساب
+          await whatsappPage.close();
+          await this.page.bringToFront();
+
+          const result = {
+            success: true,
+            messageId: message.messageId,
+            senderName: message.senderName,
+            replyText: replyText,
+            adId: targetAdId,
+          };
+
+          results.push(result);
           await this.wait(2000);
         } catch (error) {
           console.error(`Failed to process message:`, error);
