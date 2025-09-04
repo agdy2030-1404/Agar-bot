@@ -1,6 +1,6 @@
 'use client';
 
-import DashboardComp from '@/components/dashboard/Dashboard.jsx';
+import DashboardComp from '@/components/dashboard/Dashboard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 export default function DashboardPage() {
