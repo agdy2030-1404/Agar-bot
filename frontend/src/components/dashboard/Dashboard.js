@@ -9,7 +9,7 @@ import Header from "./Header";
 import AutoReplyManager from "./AutoReplyManager";
 import Messages from "./Messages";
 
-const DashboardComp = () => {
+const Dashboard = () => {
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -120,4 +120,4 @@ const DashboardComp = () => {
   );
 };
 
-export default DashboardComp;
+export default Dashboard;
