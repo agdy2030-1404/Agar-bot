@@ -25,7 +25,6 @@ export default function BotStatus() {
   });
 
   useEffect(() => {
-    // جلب حالة المجدول عند التحميل
     dispatch(getSchedulerStatus());
   }, [dispatch]);
 
@@ -55,12 +54,11 @@ export default function BotStatus() {
       if (schedulerStatus.isRunning) {
         dispatch(getSchedulerStatus());
       }
-    }, 60000); // تحديث كل دقيقة
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [schedulerStatus.isRunning, dispatch]);
 
-  // وفي حالة تغيير حالة التحديث التلقائي
   useEffect(() => {
     dispatch(getSchedulerStatus());
   }, [isRunning, isLoggedIn, dispatch]);

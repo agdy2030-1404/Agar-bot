@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "نظام إدارة الإعلانات العقارية",
+  title: "بم نظام إدارة الإعلانات العقارية",
   description: "لوحة تحكم لإدارة الإعلانات العقارية والرد التلقائي",
 };
 

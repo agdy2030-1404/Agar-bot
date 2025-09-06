@@ -13,11 +13,9 @@ const Dashboard = () => {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    // تحميل البيانات الأولية
     dispatch(getBotStatus());
     dispatch(getAds());
 
-    // تحديث البيانات كل 30 ثانية
     const interval = setInterval(() => {
       dispatch(getBotStatus());
     }, 30000);
@@ -30,7 +28,6 @@ const Dashboard = () => {
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* نظرة عامة سريعة */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
           <div className="bg-white rounded-2xl p-5 shadow-md border border-gray-100">
             <div className="flex items-center">

@@ -59,7 +59,7 @@ export default function Messages() {
           <div className="bg-gradient-to-r from-purple-600 to-indigo-700 p-6 text-white">
             <h2 className="text-2xl font-bold">إدارة الرسائل</h2>
             <p className="text-purple-200 mt-1">
-              عرض وإدارة جميع رسائل العملاء
+               عرض وإدارة جميع رسائل العملاء
             </p>
           </div>
 
