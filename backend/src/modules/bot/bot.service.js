@@ -3,7 +3,6 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
-import { executablePath } from "puppeteer"; // مهم
 
 // استخدام إضافة التخفي لتجنب الكشف
 puppeteer.use(StealthPlugin());
@@ -31,8 +30,6 @@ class BotService {
     try {
       this.browser = await puppeteer.launch({
         headless: true, // على Render لازم يكون headless
-        executablePath: executablePath(), // يخلي Puppeteer يستعمل Chrome اللي نزلناه
-
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
