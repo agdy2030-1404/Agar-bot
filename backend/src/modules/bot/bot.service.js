@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
 
-// استخدام إضافة التخفي لتجنب الكشف
 puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,12 +29,9 @@ class BotService {
     try {
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath:
-          process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
           "--disable-web-security",
           "--disable-features=IsolateOrigins,site-per-process",
         ],
@@ -44,7 +40,7 @@ class BotService {
 
       this.page = await this.browser.newPage();
 
-      // تعيين User-Agent
+      // تعيين User-Agent واقعي
       await this.page.setUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
       );
