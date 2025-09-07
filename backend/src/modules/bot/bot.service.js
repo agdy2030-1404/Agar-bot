@@ -27,8 +27,11 @@ class BotService {
   // تهيئة المتصفح
   async initBrowser() {
     try {
+      const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined; // يستخدم Chromium المثبت من Puppeteer
+
       this.browser = await puppeteer.launch({
         headless: true,
+        executablePath,
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -39,12 +42,11 @@ class BotService {
       });
 
       this.page = await this.browser.newPage();
-
-      // تعيين User-Agent واقعي
       await this.page.setUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
       );
 
+      console.log("✅ Browser initialized successfully");
       return true;
     } catch (error) {
       console.error("Error initializing browser:", error);
