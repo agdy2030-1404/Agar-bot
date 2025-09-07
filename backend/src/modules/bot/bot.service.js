@@ -3,6 +3,7 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
+import { executablePath } from "puppeteer"; // مهم
 
 // استخدام إضافة التخفي لتجنب الكشف
 puppeteer.use(StealthPlugin());
@@ -29,7 +30,9 @@ class BotService {
   async initBrowser() {
     try {
       this.browser = await puppeteer.launch({
-        headless: false, // يمكن تغييره إلى true في production
+        headless: true, // على Render لازم يكون headless
+        executablePath: executablePath(), // يخلي Puppeteer يستعمل Chrome اللي نزلناه
+
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -1486,44 +1489,47 @@ class BotService {
     }
   }
 
-async clickWhatsappButton(messageElement) {
-  try {
-    console.log("Clicking WhatsApp button...");
+  async clickWhatsappButton(messageElement) {
+    try {
+      console.log("Clicking WhatsApp button...");
 
-    const whatsappButton = await messageElement.$('button:has-text("واتساب")');
-    if (!whatsappButton) {
-      throw new Error("زر الواتساب غير موجود في هذه الرسالة");
+      const whatsappButton = await messageElement.$(
+        'button:has-text("واتساب")'
+      );
+      if (!whatsappButton) {
+        throw new Error("زر الواتساب غير موجود في هذه الرسالة");
+      }
+
+      await whatsappButton.click();
+      await this.wait(5000); // انتظار أطول لفتح الصفحة
+
+      const pages = await this.browser.pages();
+      const whatsappPage = pages.find(
+        (page) =>
+          page.url().includes("api.whatsapp.com") ||
+          page.url().includes("web.whatsapp.com")
+      );
+
+      if (!whatsappPage) {
+        throw new Error("لم يتم فتح الواتساب");
+      }
+
+      await whatsappPage.bringToFront();
+
+      // التعامل مع صفحة api.whatsapp.com
+      if (whatsappPage.url().includes("api.whatsapp.com")) {
+        await this.clickContinueToChat(whatsappPage);
+        await this.wait(3000);
+        await this.handlePermissionPopup(whatsappPage);
+      }
+
+      console.log("WhatsApp opened successfully");
+      return whatsappPage;
+    } catch (error) {
+      console.error("Error clicking WhatsApp button:", error);
+      throw error;
     }
-
-    await whatsappButton.click();
-    await this.wait(5000); // انتظار أطول لفتح الصفحة
-
-    const pages = await this.browser.pages();
-    const whatsappPage = pages.find(page => 
-      page.url().includes('api.whatsapp.com') || 
-      page.url().includes('web.whatsapp.com')
-    );
-
-    if (!whatsappPage) {
-      throw new Error("لم يتم فتح الواتساب");
-    }
-
-    await whatsappPage.bringToFront();
-    
-    // التعامل مع صفحة api.whatsapp.com
-    if (whatsappPage.url().includes('api.whatsapp.com')) {
-      await this.clickContinueToChat(whatsappPage);
-      await this.wait(3000);
-      await this.handlePermissionPopup(whatsappPage);
-    }
-
-    console.log("WhatsApp opened successfully");
-    return whatsappPage;
-  } catch (error) {
-    console.error("Error clicking WhatsApp button:", error);
-    throw error;
   }
-}
 
   async sendWhatsappMessage(whatsappPage, message) {
     try {
@@ -1740,50 +1746,53 @@ async clickWhatsappButton(messageElement) {
   }
 
   async clickContinueToChat(whatsappPage) {
-  try {
-    await whatsappPage.waitForSelector('#action-button', { timeout: 10000 });
-    await whatsappPage.click('#action-button');
-    console.log("Clicked Continue to Chat");
-    return true;
-  } catch (error) {
-    console.log("Continue to Chat button not found, may already be in chat");
-    return false;
-  }
-}
-
-async handlePermissionPopup(whatsappPage) {
-  try {
-    // الانتظار لظهور popup السماح (إذا ظهر)
-    await whatsappPage.waitForSelector('button:has-text("Open WhatsApp")', { 
-      timeout: 5000,
-      visible: true 
-    });
-    
-    // النقر على "Open WhatsApp"
-    await whatsappPage.click('button:has-text("Open WhatsApp")');
-    console.log("Clicked Open WhatsApp in permission popup");
-    return true;
-  } catch (error) {
-    console.log("No permission popup found or already handled");
-    return false;
-  }
-}
-
-async checkAndProcessMessages() {
-  try {
-    const result = await this.processNewMessages();
-    
-    if (result.status === "no_messages" || result.status === "no_new_messages") {
-      console.log("✅ لا توجد رسائل للرد عليها - تم إيقاف العملية");
-      return { success: true, message: "No messages to process" };
+    try {
+      await whatsappPage.waitForSelector("#action-button", { timeout: 10000 });
+      await whatsappPage.click("#action-button");
+      console.log("Clicked Continue to Chat");
+      return true;
+    } catch (error) {
+      console.log("Continue to Chat button not found, may already be in chat");
+      return false;
     }
-    
-    return result;
-  } catch (error) {
-    console.error("Error in message processing:", error);
-    throw error;
   }
-}
+
+  async handlePermissionPopup(whatsappPage) {
+    try {
+      // الانتظار لظهور popup السماح (إذا ظهر)
+      await whatsappPage.waitForSelector('button:has-text("Open WhatsApp")', {
+        timeout: 5000,
+        visible: true,
+      });
+
+      // النقر على "Open WhatsApp"
+      await whatsappPage.click('button:has-text("Open WhatsApp")');
+      console.log("Clicked Open WhatsApp in permission popup");
+      return true;
+    } catch (error) {
+      console.log("No permission popup found or already handled");
+      return false;
+    }
+  }
+
+  async checkAndProcessMessages() {
+    try {
+      const result = await this.processNewMessages();
+
+      if (
+        result.status === "no_messages" ||
+        result.status === "no_new_messages"
+      ) {
+        console.log("✅ لا توجد رسائل للرد عليها - تم إيقاف العملية");
+        return { success: true, message: "No messages to process" };
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error in message processing:", error);
+      throw error;
+    }
+  }
 
   async debugCurrentPage() {
     try {
