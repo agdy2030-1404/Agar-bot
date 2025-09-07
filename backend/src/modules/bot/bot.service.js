@@ -26,35 +26,35 @@ class BotService {
     return new Promise((resolve) => setTimeout(resolve, timeout));
   }
   // تهيئة المتصفح
-async initBrowser() {
-  try {
-    this.browser = await puppeteer.launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // يحدد الكروميوم المدمج
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process",
-      ],
-      defaultViewport: null,
-    });
+  async initBrowser() {
+    try {
+      this.browser = await puppeteer.launch({
+        headless: true,
+        executablePath:
+          process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
+        defaultViewport: null,
+      });
 
-    this.page = await this.browser.newPage();
+      this.page = await this.browser.newPage();
 
-    // تعيين User-Agent
-    await this.page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    );
+      // تعيين User-Agent
+      await this.page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      );
 
-    return true;
-  } catch (error) {
-    console.error("Error initializing browser:", error);
-    throw error;
+      return true;
+    } catch (error) {
+      console.error("Error initializing browser:", error);
+      throw error;
+    }
   }
-}
-
 
   // تحميل الكوكيز المحفوظة
   async loadCookies() {
