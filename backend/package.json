@@ -5,10 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
-    "install-chrome": "PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer npx puppeteer browsers install chrome",
-    "build": "npm run install-chrome",
-    "postinstall": "npm run install-chrome"
+    "start": "node src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -29,8 +26,5 @@
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "zod": "^4.0.17"
-  },
-  "puppeteer": {
-    "cacheDirectory": "/opt/render/.cache/puppeteer"
   }
 }

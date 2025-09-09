@@ -1,433 +1,374 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { fileURLToPath } from "url";
-import path from "path";
-import fs from "fs";
+  import puppeteer from "puppeteer-extra";
+  import StealthPlugin from "puppeteer-extra-plugin-stealth";
+  import { fileURLToPath } from "url";
+  import path from "path";
+  import fs from "fs";
 
-puppeteer.use(StealthPlugin());
+  // استخدام إضافة التخفي لتجنب الكشف
+  puppeteer.use(StealthPlugin());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
 
-class BotService {
-  constructor() {
-    this.browser = null;
-    this.page = null;
-    this.isLoggedIn = false;
-    this.cookiesPath = path.join(__dirname, "cookies.json");
-    this.updateQueue = [];
-    this.isProcessingQueue = false;
-    this.messageQueue = [];
-    this.isProcessingMessages = false;
-
-    // تحديد وضع التشغيل
-    this.isProduction = process.env.NODE_ENV === "production";
-    this.headless = this.isProduction ? true : false;
-
-    // تحديد مسار Chrome لـ Render
-    this.executablePath =
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      "/opt/render/.cache/puppeteer/chrome/linux-139.0.7258.138/chrome-linux64/chrome";
-  }
-
-  async wait(timeout) {
-    return new Promise((resolve) => setTimeout(resolve, timeout));
-  }
-
-  async initBrowser() {
-    try {
-      const launchOptions = {
-        headless: this.headless, // ← يستخدم الوضع المناسب للبيئة
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=IsolateOrigins,site-per-process",
-          "--single-process",
-        ],
-        defaultViewport: { width: 1280, height: 720 },
-        ignoreHTTPSErrors: true,
-        timeout: 60000,
-      };
-
-      // على Render فقط: استخدام مسار Chrome المخصص
-      if (this.isProduction) {
-        console.log("Production environment detected - using Render settings");
-
-        if (fs.existsSync(this.executablePath)) {
-          launchOptions.executablePath = this.executablePath;
-          console.log("Using custom Chrome executable:", this.executablePath);
-        } else {
-          console.log("Custom Chrome not found, using system chromium");
-          launchOptions.executablePath = "/usr/bin/chromium-browser";
-        }
-      } else {
-        console.log("Development environment - using default settings");
-        // على localhost، لا نحتاج executablePath مخصص
-      }
-
-      this.browser = await puppeteer.launch(launchOptions);
-      this.page = await this.browser.newPage();
-
-      await this.page.setUserAgent(
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
-      );
-
-      this.page.on("error", (error) => {
-        console.log("Page error:", error.message);
-      });
-
-      this.page.on("pageerror", (error) => {
-        console.log("Page error:", error.message);
-      });
-
-      console.log(
-        "Browser initialized successfully in",
-        this.isProduction ? "production" : "development",
-        "mode"
-      );
-      return true;
-    } catch (error) {
-      console.error("Error initializing browser:", error);
-
-      // محاولة بديلة
+  class BotService {
+    constructor() {
+      this.browser = null;
+      this.page = null;
+      this.isLoggedIn = false;
+      this.cookiesPath = path.join(__dirname, "cookies.json");
+      this.updateQueue = [];
+      this.isProcessingQueue = false;
+      this.messageQueue = [];
+      this.isProcessingMessages = false;
+    }
+    // دالة مساعدة لانتظار وقت محدد
+    async wait(timeout) {
+      return new Promise((resolve) => setTimeout(resolve, timeout));
+    }
+    // تهيئة المتصفح
+    async initBrowser() {
       try {
-        console.log("Trying fallback browser initialization...");
         this.browser = await puppeteer.launch({
-          headless: true,
+          headless: false, // على Render لازم يكون headless
           args: [
             "--no-sandbox",
             "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
+            "--disable-web-security",
+            "--disable-features=IsolateOrigins,site-per-process",
           ],
+          defaultViewport: null,
         });
+
         this.page = await this.browser.newPage();
+
+        // تعيين User-Agent واقعي
+        await this.page.setUserAgent(
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        );
+
         return true;
-      } catch (fallbackError) {
-        console.error("Fallback browser initialization failed:", fallbackError);
+      } catch (error) {
+        console.error("Error initializing browser:", error);
         throw error;
       }
     }
-  }
 
-  // تحميل الكوكيز المحفوظة
-  async loadCookies() {
-    try {
-      if (fs.existsSync(this.cookiesPath)) {
-        const cookiesString = fs.readFileSync(this.cookiesPath, "utf8");
-        let cookies = JSON.parse(cookiesString);
+    // تحميل الكوكيز المحفوظة
+    async loadCookies() {
+      try {
+        if (fs.existsSync(this.cookiesPath)) {
+          const cookiesString = fs.readFileSync(this.cookiesPath, "utf8");
+          let cookies = JSON.parse(cookiesString);
 
-        console.log(`Loading ${cookies.length} cookies from file`);
+          console.log(`Loading ${cookies.length} cookies from file`);
 
-        // تصحيح النطاق للكوكيز
-        cookies = cookies.map((cookie) => {
-          // جعل جميع كوكيز aqar.fm صالحة للنطاقات الفرعية
+          // تصحيح النطاق للكوكيز
+          cookies = cookies.map((cookie) => {
+            // جعل جميع كوكيز aqar.fm صالحة للنطاقات الفرعية
+            if (cookie.domain && cookie.domain.includes("aqar.fm")) {
+              return {
+                ...cookie,
+                domain: "sa.aqar.fm", // النقطة في البداية تجعلها صالحة لجميع النطاقات الفرعية
+              };
+            }
+            return cookie;
+          });
+
+          await this.page.setCookie(...cookies);
+          console.log("Cookies loaded successfully with domain fix");
+
+          // التحقق من الكوكيز المحملة
+          const loadedCookies = await this.page.cookies();
+          console.log(`Total cookies in browser: ${loadedCookies.length}`);
+
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("Error loading cookies:", error);
+        return false;
+      }
+    }
+
+    // حفظ الكوكيز
+    async saveCookies() {
+      try {
+        const cookies = await this.page.cookies();
+        console.log(`Saving ${cookies.length} cookies`);
+
+        // تصحيح النطاق وتواريخ الانتهاء
+        const cookiesToSave = cookies.map((cookie) => {
+          let updatedCookie = { ...cookie };
+
           if (cookie.domain && cookie.domain.includes("aqar.fm")) {
-            return {
-              ...cookie,
-              domain: "sa.aqar.fm", // النقطة في البداية تجعلها صالحة لجميع النطاقات الفرعية
-            };
+            updatedCookie.domain = "sa.aqar.fm";
           }
-          return cookie;
+
+          // إصلاح تاريخ انتهاء session cookies
+          if (cookie.session && cookie.expires <= 0) {
+            updatedCookie.expires =
+              Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 يوم
+            updatedCookie.session = false;
+          }
+
+          return updatedCookie;
         });
 
-        await this.page.setCookie(...cookies);
-        console.log("Cookies loaded successfully with domain fix");
-
-        // التحقق من الكوكيز المحملة
-        const loadedCookies = await this.page.cookies();
-        console.log(`Total cookies in browser: ${loadedCookies.length}`);
-
-        return true;
+        fs.writeFileSync(
+          this.cookiesPath,
+          JSON.stringify(cookiesToSave, null, 2)
+        );
+        console.log("Cookies saved successfully");
+      } catch (error) {
+        console.error("Error saving cookies:", error);
       }
-      return false;
-    } catch (error) {
-      console.error("Error loading cookies:", error);
-      return false;
     }
-  }
 
-  // حفظ الكوكيز
-  async saveCookies() {
-    try {
-      const cookies = await this.page.cookies();
-      console.log(`Saving ${cookies.length} cookies`);
-
-      // تصحيح النطاق وتواريخ الانتهاء
-      const cookiesToSave = cookies.map((cookie) => {
-        let updatedCookie = { ...cookie };
-
-        if (cookie.domain && cookie.domain.includes("aqar.fm")) {
-          updatedCookie.domain = "sa.aqar.fm";
-        }
-
-        // إصلاح تاريخ انتهاء session cookies
-        if (cookie.session && cookie.expires <= 0) {
-          updatedCookie.expires =
-            Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 يوم
-          updatedCookie.session = false;
-        }
-
-        return updatedCookie;
-      });
-
-      fs.writeFileSync(
-        this.cookiesPath,
-        JSON.stringify(cookiesToSave, null, 2)
-      );
-      console.log("Cookies saved successfully");
-    } catch (error) {
-      console.error("Error saving cookies:", error);
-    }
-  }
-
-  // تسجيل الدخول إلى موقع عقار
-  async loginToAqar() {
-    try {
-      if (!this.browser || !this.page) {
-        await this.initBrowser();
-      }
-      // الانتقال إلى صفحة التسجيل
-      await this.page.goto("https://sa.aqar.fm", { waitUntil: "networkidle2" });
-
-      // النقر على زر الحساب لفتح نافذة التسجيل
-      await this.page.waitForSelector("button._profile__Ji8ui", {
-        timeout: 10000,
-      });
-      await this.page.click("button._profile__Ji8ui");
-
-      // الانتظار حتى تظهر نافذة التسجيل
-      await this.page.waitForSelector(".auth_authContainer__lxV5d", {
-        timeout: 10000,
-      });
-
-      // ملء حقل رقم الجوال
-      await this.page.waitForSelector('input[name="phone"]', {
-        timeout: 10000,
-      });
-      await this.page.type('input[name="phone"]', process.env.AQAR_USERNAME, {
-        delay: 100,
-      });
-
-      // ملء حقل كلمة المرور
-      await this.page.waitForSelector('input[name="password"]', {
-        timeout: 10000,
-      });
-      await this.page.type(
-        'input[name="password"]',
-        process.env.AQAR_PASSWORD,
-        { delay: 100 }
-      );
-
-      // النقر على زر الدخول
-      await this.page.waitForSelector("button.auth_actionButton___fcG7", {
-        timeout: 10000,
-      });
-      await this.page.click("button.auth_actionButton___fcG7");
-
-      // بعد الانتظار للتوجيه إلى الصفحة الرئيسية
-      await this.page.waitForNavigation({
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-
-      // الانتظار قليلاً ثم محاولة فتح السايدبار للتحقق
-      await this.wait(3000);
-
+    // تسجيل الدخول إلى موقع عقار
+    async loginToAqar() {
       try {
-        // النقر على أيقونة الحساب لفتح السايدبار
+        if (!this.browser || !this.page) {
+          await this.initBrowser();
+        }
+        // الانتقال إلى صفحة التسجيل
+        await this.page.goto("https://sa.aqar.fm", { waitUntil: "networkidle2" });
+
+        // النقر على زر الحساب لفتح نافذة التسجيل
         await this.page.waitForSelector("button._profile__Ji8ui", {
           timeout: 10000,
         });
         await this.page.click("button._profile__Ji8ui");
 
-        // الانتظار حتى يظهر السايدبار والتحقق من عناصر المستخدم
-        await this.page.waitForSelector(".sidebar_userInfo__BwI9S", {
-          timeout: 15000,
+        // الانتظار حتى تظهر نافذة التسجيل
+        await this.page.waitForSelector(".auth_authContainer__lxV5d", {
+          timeout: 10000,
         });
-      } catch (error) {
-        console.warn(
-          "Could not open sidebar, but login might still be successful"
+
+        // ملء حقل رقم الجوال
+        await this.page.waitForSelector('input[name="phone"]', {
+          timeout: 10000,
+        });
+        await this.page.type('input[name="phone"]', process.env.AQAR_USERNAME, {
+          delay: 100,
+        });
+
+        // ملء حقل كلمة المرور
+        await this.page.waitForSelector('input[name="password"]', {
+          timeout: 10000,
+        });
+        await this.page.type(
+          'input[name="password"]',
+          process.env.AQAR_PASSWORD,
+          { delay: 100 }
         );
-        // محاولة بديلة للتحقق
-        const userLinkVisible = await this.page.evaluate(() => {
-          return !!document.querySelector('[href*="/user/"]');
+
+        // النقر على زر الدخول
+        await this.page.waitForSelector("button.auth_actionButton___fcG7", {
+          timeout: 10000,
         });
+        await this.page.click("button.auth_actionButton___fcG7");
 
-        if (!userLinkVisible) {
-          throw new Error("Login verification failed - no user elements found");
-        }
-      }
-
-      // حفظ الكوكيز للجلسات القادمة
-      await this.saveCookies();
-      // التحقق من الكوكيز
-      const cookiesValid = await this.verifyCookies();
-      if (!cookiesValid) {
-        console.warn("Cookies verification failed after login");
-      }
-
-      this.isLoggedIn = true;
-      console.log("Login successful and cookies verified");
-      return true;
-    } catch (error) {
-      console.error("Login failed:", error);
-      throw error;
-    }
-  }
-
-  async verifyLoginByOpeningSidebar() {
-    try {
-      // محاولة فتح السايدبار
-      await this.page.waitForSelector("button._profile__Ji8ui", {
-        timeout: 5000,
-      });
-      await this.page.click("button._profile__Ji8ui");
-
-      // الانتظار حتى يظهر السايدبار
-      await this.page.waitForSelector(".sidebar_container___aoT3", {
-        timeout: 5000,
-      });
-
-      // التحقق من وجود معلومات المستخدم
-      const hasUserInfo = await this.page.evaluate(() => {
-        return !!document.querySelector(".sidebar_userInfo__BwI9S");
-      });
-
-      // إغلاق السايدبار بالنقر خارجها (اختياري)
-      try {
-        await this.page.click(".sidebar_overlay__t4lF8", { timeout: 2000 });
-      } catch (e) {
-        // تجاهل الخطأ إذا لم يتمكن من الإغلاق
-      }
-
-      return hasUserInfo;
-    } catch (error) {
-      console.log("Could not verify login by opening sidebar:", error);
-      return false;
-    }
-  }
-
-  // التحقق من حالة التسجيل
-  async checkLoginStatus() {
-    try {
-      if (!this.page) throw new Error("البوت غير مشغل بعد");
-
-      // إذا كان مسجلاً الدخول مسبقاً
-      if (this.isLoggedIn) return true;
-
-      // التحقق من الكوكيز أولاً
-      const cookiesLoaded = await this.loadCookies();
-
-      if (cookiesLoaded) {
-        // الذهاب إلى الصفحة الرئيسية
-        await this.page.goto("https://sa.aqar.fm", {
+        // بعد الانتظار للتوجيه إلى الصفحة الرئيسية
+        await this.page.waitForNavigation({
           waitUntil: "networkidle2",
           timeout: 30000,
         });
 
-        // الانتظار لمدة قصيرة للتحميل
+        // الانتظار قليلاً ثم محاولة فتح السايدبار للتحقق
         await this.wait(3000);
 
-        // محاولة فتح السايدبار بالنقر على أيقونة الحساب
         try {
+          // النقر على أيقونة الحساب لفتح السايدبار
           await this.page.waitForSelector("button._profile__Ji8ui", {
-            timeout: 5000,
+            timeout: 10000,
           });
           await this.page.click("button._profile__Ji8ui");
 
-          // الانتظار حتى يظهر السايدبار
-          await this.page.waitForSelector(".sidebar_container___aoT3", {
-            timeout: 5000,
+          // الانتظار حتى يظهر السايدبار والتحقق من عناصر المستخدم
+          await this.page.waitForSelector(".sidebar_userInfo__BwI9S", {
+            timeout: 15000,
+          });
+        } catch (error) {
+          console.warn(
+            "Could not open sidebar, but login might still be successful"
+          );
+          // محاولة بديلة للتحقق
+          const userLinkVisible = await this.page.evaluate(() => {
+            return !!document.querySelector('[href*="/user/"]');
           });
 
-          // التحقق من وجود عناصر المستخدم المسجل
-          const isLoggedIn = await this.page.evaluate(() => {
-            return !!document.querySelector(".sidebar_userInfo__BwI9S");
+          if (!userLinkVisible) {
+            throw new Error("Login verification failed - no user elements found");
+          }
+        }
+
+        // حفظ الكوكيز للجلسات القادمة
+        await this.saveCookies();
+        // التحقق من الكوكيز
+        const cookiesValid = await this.verifyCookies();
+        if (!cookiesValid) {
+          console.warn("Cookies verification failed after login");
+        }
+
+        this.isLoggedIn = true;
+        console.log("Login successful and cookies verified");
+        return true;
+      } catch (error) {
+        console.error("Login failed:", error);
+        throw error;
+      }
+    }
+
+    async verifyLoginByOpeningSidebar() {
+      try {
+        // محاولة فتح السايدبار
+        await this.page.waitForSelector("button._profile__Ji8ui", {
+          timeout: 5000,
+        });
+        await this.page.click("button._profile__Ji8ui");
+
+        // الانتظار حتى يظهر السايدبار
+        await this.page.waitForSelector(".sidebar_container___aoT3", {
+          timeout: 5000,
+        });
+
+        // التحقق من وجود معلومات المستخدم
+        const hasUserInfo = await this.page.evaluate(() => {
+          return !!document.querySelector(".sidebar_userInfo__BwI9S");
+        });
+
+        // إغلاق السايدبار بالنقر خارجها (اختياري)
+        try {
+          await this.page.click(".sidebar_overlay__t4lF8", { timeout: 2000 });
+        } catch (e) {
+          // تجاهل الخطأ إذا لم يتمكن من الإغلاق
+        }
+
+        return hasUserInfo;
+      } catch (error) {
+        console.log("Could not verify login by opening sidebar:", error);
+        return false;
+      }
+    }
+
+    // التحقق من حالة التسجيل
+    async checkLoginStatus() {
+      try {
+        if (!this.page) throw new Error("البوت غير مشغل بعد");
+
+        // إذا كان مسجلاً الدخول مسبقاً
+        if (this.isLoggedIn) return true;
+
+        // التحقق من الكوكيز أولاً
+        const cookiesLoaded = await this.loadCookies();
+
+        if (cookiesLoaded) {
+          // الذهاب إلى الصفحة الرئيسية
+          await this.page.goto("https://sa.aqar.fm", {
+            waitUntil: "networkidle2",
+            timeout: 30000,
           });
 
-          if (isLoggedIn) {
+          // الانتظار لمدة قصيرة للتحميل
+          await this.wait(3000);
+
+          // محاولة فتح السايدبار بالنقر على أيقونة الحساب
+          try {
+            await this.page.waitForSelector("button._profile__Ji8ui", {
+              timeout: 5000,
+            });
+            await this.page.click("button._profile__Ji8ui");
+
+            // الانتظار حتى يظهر السايدبار
+            await this.page.waitForSelector(".sidebar_container___aoT3", {
+              timeout: 5000,
+            });
+
+            // التحقق من وجود عناصر المستخدم المسجل
+            const isLoggedIn = await this.page.evaluate(() => {
+              return !!document.querySelector(".sidebar_userInfo__BwI9S");
+            });
+
+            if (isLoggedIn) {
+              this.isLoggedIn = true;
+              console.log("User is logged in (verified by sidebar elements)");
+              return true;
+            }
+          } catch (e) {
+            console.log("Sidebar verification failed, trying alternative check");
+          }
+
+          // محاولة بديلة للتحقق من التسجيل
+          const alternativeCheck = await this.page.evaluate(() => {
+            // التحقق من وجود رابط يحتوي على /user/ والذي يشير إلى صفحة المستخدم
+            return !!document.querySelector('[href*="/user/"]');
+          });
+
+          if (alternativeCheck) {
             this.isLoggedIn = true;
-            console.log("User is logged in (verified by sidebar elements)");
+            console.log("User is logged in (verified by user link)");
             return true;
           }
-        } catch (e) {
-          console.log("Sidebar verification failed, trying alternative check");
         }
 
-        // محاولة بديلة للتحقق من التسجيل
-        const alternativeCheck = await this.page.evaluate(() => {
-          // التحقق من وجود رابط يحتوي على /user/ والذي يشير إلى صفحة المستخدم
-          return !!document.querySelector('[href*="/user/"]');
+        // إذا فشل التحقق، حاول التسجيل
+        if (!this.isLoggedIn) {
+          console.log("Not logged in, attempting to login...");
+          return await this.loginToAqar();
+        }
+
+        return true;
+      } catch (error) {
+        console.error("Error checking login status:", error);
+        return false;
+      }
+    }
+    async verifyCookies() {
+      try {
+        const cookies = await this.page.cookies();
+
+        // الكوكيز الأساسية المطلوبة
+        const requiredCookies = ["user", "cf_clearance", "webapp_token"];
+        const hasRequiredCookies = requiredCookies.every((reqCookie) =>
+          cookies.some(
+            (cookie) =>
+              cookie.name === reqCookie && cookie.domain.includes("aqar.fm")
+          )
+        );
+
+        console.log("Cookies verification:", {
+          totalCookies: cookies.length,
+          hasUserCookie: cookies.some((c) => c.name === "user"),
+          hasCfClearance: cookies.some((c) => c.name === "cf_clearance"),
+          hasWebappToken: cookies.some((c) => c.name === "webapp_token"),
+          hasRequiredCookies,
         });
 
-        if (alternativeCheck) {
-          this.isLoggedIn = true;
-          console.log("User is logged in (verified by user link)");
-          return true;
-        }
+        return hasRequiredCookies;
+      } catch (error) {
+        console.error("Error verifying cookies:", error);
+        return false;
       }
-
-      // إذا فشل التحقق، حاول التسجيل
-      if (!this.isLoggedIn) {
-        console.log("Not logged in, attempting to login...");
-        return await this.loginToAqar();
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Error checking login status:", error);
-      return false;
     }
-  }
-  async verifyCookies() {
-    try {
+
+    async debugCookies() {
       const cookies = await this.page.cookies();
+      console.log("=== CURRENT COOKIES ===");
 
-      // الكوكيز الأساسية المطلوبة
-      const requiredCookies = ["user", "cf_clearance", "webapp_token"];
-      const hasRequiredCookies = requiredCookies.every((reqCookie) =>
-        cookies.some(
-          (cookie) =>
-            cookie.name === reqCookie && cookie.domain.includes("aqar.fm")
-        )
-      );
-
-      console.log("Cookies verification:", {
-        totalCookies: cookies.length,
-        hasUserCookie: cookies.some((c) => c.name === "user"),
-        hasCfClearance: cookies.some((c) => c.name === "cf_clearance"),
-        hasWebappToken: cookies.some((c) => c.name === "webapp_token"),
-        hasRequiredCookies,
+      cookies.forEach((cookie) => {
+        if (cookie.domain.includes("aqar.fm")) {
+          console.log({
+            name: cookie.name,
+            domain: cookie.domain,
+            value: cookie.value.substring(0, 50) + "...",
+            expires: new Date(cookie.expires * 1000).toLocaleString(),
+            session: cookie.session,
+          });
+        }
       });
 
-      return hasRequiredCookies;
-    } catch (error) {
-      console.error("Error verifying cookies:", error);
-      return false;
+      console.log("======================");
     }
-  }
-
-  async debugCookies() {
-    const cookies = await this.page.cookies();
-    console.log("=== CURRENT COOKIES ===");
-
-    cookies.forEach((cookie) => {
-      if (cookie.domain.includes("aqar.fm")) {
-        console.log({
-          name: cookie.name,
-          domain: cookie.domain,
-          value: cookie.value.substring(0, 50) + "...",
-          expires: new Date(cookie.expires * 1000).toLocaleString(),
-          session: cookie.session,
-        });
-      }
-    });
-
-    console.log("======================");
-  }
 
   async navigateToUserAds() {
     try {
