@@ -3,7 +3,9 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
+import { executablePath } from "puppeteer";
 
+// استخدام إضافة التخفي لتجنب الكشف
 puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +21,10 @@ class BotService {
     this.isProcessingQueue = false;
     this.messageQueue = [];
     this.isProcessingMessages = false;
+    // تحديد مسار Chrome لـ Render
+    this.executablePath =
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      "/opt/render/.cache/puppeteer/chrome/linux-139.0.7258.138/chrome-linux64/chrome";
   }
   // دالة مساعدة لانتظار وقت محدد
   async wait(timeout) {
@@ -27,30 +33,70 @@ class BotService {
   // تهيئة المتصفح
   async initBrowser() {
     try {
-      const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined; // يستخدم Chromium المثبت من Puppeteer
-
-      this.browser = await puppeteer.launch({
-        headless: true,
-        executablePath,
+      const launchOptions = {
+        headless: true, // على Render يجب أن يكون true
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
           "--disable-web-security",
           "--disable-features=IsolateOrigins,site-per-process",
+          "--single-process",
         ],
-        defaultViewport: null,
-      });
+        defaultViewport: { width: 1280, height: 720 },
+        ignoreHTTPSErrors: true,
+        timeout: 60000,
+      };
+
+      // إضافة مسار التنفيذ فقط إذا كان الملف موجوداً
+      if (fs.existsSync(this.executablePath)) {
+        launchOptions.executablePath = this.executablePath;
+        console.log("Using custom Chrome executable:", this.executablePath);
+      } else {
+        console.log("Using default Chrome executable");
+        // على Render، استخدم chromium المتوفر
+        launchOptions.executablePath = "/usr/bin/chromium-browser";
+      }
+
+      this.browser = await puppeteer.launch(launchOptions);
 
       this.page = await this.browser.newPage();
+
+      // تعيين User-Agent واقعي
       await this.page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
       );
 
-      console.log("✅ Browser initialized successfully");
+      // تجاوز أخطاء التنقل
+      this.page.on("error", (error) => {
+        console.log("Page error:", error.message);
+      });
+
+      this.page.on("pageerror", (error) => {
+        console.log("Page error:", error.message);
+      });
+
       return true;
     } catch (error) {
       console.error("Error initializing browser:", error);
-      throw error;
+
+      // محاولة بديلة بدون executablePath
+      try {
+        this.browser = await puppeteer.launch({
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+          ],
+        });
+        this.page = await this.browser.newPage();
+        return true;
+      } catch (fallbackError) {
+        console.error("Fallback browser initialization failed:", fallbackError);
+        throw error;
+      }
     }
   }
 
@@ -255,6 +301,7 @@ class BotService {
   // التحقق من حالة التسجيل
   async checkLoginStatus() {
     try {
+
       if (!this.page) throw new Error("البوت غير مشغل بعد");
 
       // إذا كان مسجلاً الدخول مسبقاً
