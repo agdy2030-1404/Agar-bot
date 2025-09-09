@@ -3,9 +3,7 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
-import { executablePath } from "puppeteer";
 
-// استخدام إضافة التخفي لتجنب الكشف
 puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,20 +19,25 @@ class BotService {
     this.isProcessingQueue = false;
     this.messageQueue = [];
     this.isProcessingMessages = false;
+
+    // تحديد وضع التشغيل
+    this.isProduction = process.env.NODE_ENV === "production";
+    this.headless = this.isProduction ? true : false;
+
     // تحديد مسار Chrome لـ Render
     this.executablePath =
       process.env.PUPPETEER_EXECUTABLE_PATH ||
       "/opt/render/.cache/puppeteer/chrome/linux-139.0.7258.138/chrome-linux64/chrome";
   }
-  // دالة مساعدة لانتظار وقت محدد
+
   async wait(timeout) {
     return new Promise((resolve) => setTimeout(resolve, timeout));
   }
-  // تهيئة المتصفح
+
   async initBrowser() {
     try {
       const launchOptions = {
-        headless: true, // على Render يجب أن يكون true
+        headless: this.headless, // ← يستخدم الوضع المناسب للبيئة
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -49,26 +52,29 @@ class BotService {
         timeout: 60000,
       };
 
-      // إضافة مسار التنفيذ فقط إذا كان الملف موجوداً
-      if (fs.existsSync(this.executablePath)) {
-        launchOptions.executablePath = this.executablePath;
-        console.log("Using custom Chrome executable:", this.executablePath);
+      // على Render فقط: استخدام مسار Chrome المخصص
+      if (this.isProduction) {
+        console.log("Production environment detected - using Render settings");
+
+        if (fs.existsSync(this.executablePath)) {
+          launchOptions.executablePath = this.executablePath;
+          console.log("Using custom Chrome executable:", this.executablePath);
+        } else {
+          console.log("Custom Chrome not found, using system chromium");
+          launchOptions.executablePath = "/usr/bin/chromium-browser";
+        }
       } else {
-        console.log("Using default Chrome executable");
-        // على Render، استخدم chromium المتوفر
-        launchOptions.executablePath = "/usr/bin/chromium-browser";
+        console.log("Development environment - using default settings");
+        // على localhost، لا نحتاج executablePath مخصص
       }
 
       this.browser = await puppeteer.launch(launchOptions);
-
       this.page = await this.browser.newPage();
 
-      // تعيين User-Agent واقعي
       await this.page.setUserAgent(
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
       );
 
-      // تجاوز أخطاء التنقل
       this.page.on("error", (error) => {
         console.log("Page error:", error.message);
       });
@@ -77,12 +83,18 @@ class BotService {
         console.log("Page error:", error.message);
       });
 
+      console.log(
+        "Browser initialized successfully in",
+        this.isProduction ? "production" : "development",
+        "mode"
+      );
       return true;
     } catch (error) {
       console.error("Error initializing browser:", error);
 
-      // محاولة بديلة بدون executablePath
+      // محاولة بديلة
       try {
+        console.log("Trying fallback browser initialization...");
         this.browser = await puppeteer.launch({
           headless: true,
           args: [
@@ -301,7 +313,6 @@ class BotService {
   // التحقق من حالة التسجيل
   async checkLoginStatus() {
     try {
-
       if (!this.page) throw new Error("البوت غير مشغل بعد");
 
       // إذا كان مسجلاً الدخول مسبقاً
